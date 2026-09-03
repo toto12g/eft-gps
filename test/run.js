@@ -32,6 +32,7 @@ import { tarkovTimeHours, checkGameClock, formatGameTime } from '../src/clock/in
 import { loadMapDb, rankMaps, nearestPoiDistance } from '../src/mapdb/index.js';
 import { validateSample, VERDICT, MapTracker } from '../src/verify/index.js';
 import { ScreenshotWatcher, isSupported } from '../src/watch/index.js';
+import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '../src/app/pins.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
 
@@ -892,6 +893,96 @@ await check('監視できないブラウザを検出できる', () => {
   const supported = isSupported();
   truthy(typeof supported === 'boolean', '真偽値を返す');
   return `showDirectoryPicker: ${supported ? 'あり' : 'なし'}（このブラウザ）`;
+});
+
+/* --------------------------------------------------------------------- T15 */
+
+group('T15 ピン（タスクの目的地）');
+
+await check('ピンの追加・削除・改名', () => {
+  let pins = [];
+  pins = addPin(pins, { name: '目的地A', x: 100, y: 3, z: -50 });
+  pins = addPin(pins, { name: '目的地B', x: 200, y: 4, z: 60 });
+  eq(pins.length, 2, '件数');
+  eq(pins[0].name, '目的地B', '新しいものが先頭');
+  truthy(pins[0].id !== pins[1].id, 'ID が重複している');
+  pins = renamePin(pins, pins[1].id, 'Debut の目標');
+  eq(pins[1].name, 'Debut の目標', '改名');
+  pins = removePin(pins, pins[0].id);
+  eq(pins.length, 1, '削除後');
+  eq(pins[0].name, 'Debut の目標', '残ったもの');
+  return '追加 2 / 改名 1 / 削除 1';
+});
+
+await check('名前が空でも壊れない', () => {
+  const pins = addPin([], { name: '   ', x: 0, y: 0, z: 0 });
+  eq(pins[0].name, '名前なし', '既定名');
+  const p2 = addPin([], { name: 'x', x: 1, z: 2 }); // y なし
+  eq(p2[0].y, 0, 'y の既定値');
+  return '空名は「名前なし」、y 省略は 0';
+});
+
+await check('距離と方位が正しい', () => {
+  // 現在地 (0,0) から真東 (+X) に 100m
+  const east = { id: 'a', name: 'e', x: 100, y: 0, z: 0, at: 0 };
+  const b1 = pinBearing({ x: 0, z: 0 }, east, null);
+  close(b1.dist, 100, 1e-9, '距離');
+  close(b1.bearing, 90, 1e-9, '方位（+X = 90°）');
+  eq(b1.relative, null, 'yaw なしでは相対角なし');
+
+  // 真北 (+Z) に 50m
+  const north = { id: 'b', name: 'n', x: 0, y: 0, z: 50, at: 0 };
+  close(pinBearing({ x: 0, z: 0 }, north, null).bearing, 0, 1e-9, '方位（+Z = 0°）');
+
+  // 北を向いているときに東のピンは右 90°
+  const b2 = pinBearing({ x: 0, z: 0 }, east, 0);
+  close(b2.relative, 90, 1e-9, '相対角');
+  // 東を向いていれば正面
+  close(pinBearing({ x: 0, z: 0 }, east, 90).relative, 0, 1e-9, '正面');
+  // 西を向いていれば真後ろ
+  close(Math.abs(pinBearing({ x: 0, z: 0 }, east, 270).relative), 180, 1e-9, '真後ろ');
+  return '+X=90° / +Z=0° / 相対角も一致';
+});
+
+await check('実データで目的地までの距離が出る', () => {
+  // Streets の実サンプルから Crash Site（脱出口）をピンに見立てる
+  const s = parseScreenshotName(RAID2);
+  const m = db.byKey.get('streets-of-tarkov');
+  const crash = (m.extracts || []).find((e) => e.name === 'Crash Site');
+  truthy(crash, 'Crash Site が見つからない');
+  const pin = { id: 'x', name: crash.name, x: crash.position.x, y: crash.position.y, z: crash.position.z, at: 0 };
+  const b = pinBearing(s, pin, quatToYawDeg(s.q));
+  close(b.dist, 61, 1.5, '距離');
+  close(b.bearing, 77, 2, '方位');
+  return `${crash.name} まで ${b.dist.toFixed(0)}m 方位 ${b.bearing.toFixed(0)}°（相対 ${b.relative.toFixed(0)}°）`;
+});
+
+await check('保存と読み込みがマップ単位で分かれる', () => {
+  const a = addPin([], { name: 'customs のピン', x: 1, y: 0, z: 2 });
+  const b = addPin([], { name: 'woods のピン', x: 3, y: 0, z: 4 });
+  savePins('__test_customs', a);
+  savePins('__test_woods', b);
+  const ra = loadPins('__test_customs');
+  const rb = loadPins('__test_woods');
+  eq(ra.length, 1, 'customs の件数');
+  eq(rb.length, 1, 'woods の件数');
+  eq(ra[0].name, 'customs のピン', 'customs の内容');
+  eq(rb[0].name, 'woods のピン', 'woods の内容');
+  eq(loadPins('__test_nothing').length, 0, '未保存のマップ');
+  localStorage.removeItem('eft-gps.pins.__test_customs');
+  localStorage.removeItem('eft-gps.pins.__test_woods');
+  return 'マップごとに独立して保存される';
+});
+
+await check('壊れた保存データを読んでも落ちない', () => {
+  localStorage.setItem('eft-gps.pins.__test_broken', '{ not json');
+  eq(loadPins('__test_broken').length, 0, '不正 JSON');
+  localStorage.setItem('eft-gps.pins.__test_broken', '[{"id":"a"},{"id":"b","x":1,"z":2},"ゴミ",null]');
+  const r = loadPins('__test_broken');
+  eq(r.length, 1, '壊れた項目を捨てる');
+  eq(r[0].id, 'b', '残った項目');
+  localStorage.removeItem('eft-gps.pins.__test_broken');
+  return '不正な保存データは静かに捨てて 0 件または有効分のみ返す';
 });
 
 /* --------------------------------------------------------------------- T14 */

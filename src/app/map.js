@@ -10,7 +10,7 @@
  * Leaflet は vendor/leaflet からグローバル L として読み込まれている前提。
  */
 
-import { applyAffine, worldToLatLng, headingToScreenDeg } from '../geo/index.js';
+import { applyAffine, worldToLatLng, latLngToWorld, headingToScreenDeg } from '../geo/index.js';
 
 /** 陣営ごとの色。地図の配色 (青緑・灰・カーキ) から浮くものを選んでいる。 */
 export const FACTION_COLOR = {
@@ -53,15 +53,37 @@ export class MapView {
     this.mapData = null;
     this.svgElement = null;
     this.trail = [];
+    this.pinLayer = null;
+    this.routeLayer = null;
     /** 表示する脱出口の陣営 */
     this.factions = new Set(['pmc', 'scav', 'shared']);
+
+    /** ピンを置くモード。次のクリックで onMapClick を呼ぶ */
+    this.placing = false;
+    /** @type {(world:{x:number,z:number}) => void} */
+    this.onMapClick = () => {};
+    /** @type {(id:string) => void} */
+    this.onPinClick = () => {};
+
+    this.map.on('click', (ev) => {
+      if (!this.placing || !this.mapData || !this.mapData.affine) return;
+      const w = latLngToWorld(this.mapData.affine, ev.latlng.lat, ev.latlng.lng);
+      if (w) this.onMapClick(w);
+    });
+  }
+
+  /** ピン設置モードの切り替え。カーソルも変える。 */
+  setPlacing(on) {
+    this.placing = !!on;
+    const el = this.map.getContainer();
+    el.classList.toggle('placing-pin', this.placing);
   }
 
   /** マップを切り替える。SVG が無いマップでは false を返す。 */
   async setMap(mapData) {
     this.mapData = mapData;
     this.trail = [];
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer']) {
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -196,6 +218,52 @@ export class MapView {
     if (!this.map.getBounds().pad(-0.15).contains(latlng)) {
       this.map.panTo(latlng, { animate: true });
     }
+  }
+
+  /**
+   * ピンを描き直す。
+   * @param {import('./pins.js').Pin[]} pins
+   * @param {string|null} activeId 目的地に設定されているピン
+   */
+  setPins(pins, activeId = null) {
+    const L = this.L;
+    if (this.pinLayer) this.pinLayer.remove();
+    this.pinLayer = null;
+    if (!this.mapData || !this.mapData.affine || !pins || !pins.length) return;
+
+    const aff = this.mapData.affine;
+    this.pinLayer = L.layerGroup().addTo(this.map);
+
+    for (const pin of pins) {
+      const active = pin.id === activeId;
+      const marker = L.marker(worldToLatLng(aff, pin.x, pin.z), {
+        icon: L.divIcon({
+          className: 'pin-icon' + (active ? ' active' : ''),
+          html: `<span class="head"></span><span class="label">${escapeHtml(pin.name)}</span>`,
+          iconSize: [0, 0],
+        }),
+        zIndexOffset: active ? 900 : 500,
+        interactive: true,
+      }).addTo(this.pinLayer);
+      marker.on('click', (ev) => {
+        // ピンをクリックしたときに地図のクリック（ピン設置）を起こさない
+        if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+        this.onPinClick(pin.id);
+      });
+    }
+  }
+
+  /** 目的地までの線を現在地から引く。 */
+  drawRoute(from, to) {
+    const L = this.L;
+    if (this.routeLayer) this.routeLayer.remove();
+    this.routeLayer = null;
+    if (!from || !to || !this.mapData || !this.mapData.affine) return;
+    const aff = this.mapData.affine;
+    this.routeLayer = L.polyline(
+      [worldToLatLng(aff, from.x, from.z), worldToLatLng(aff, to.x, to.z)],
+      { color: '#ffc848', weight: 2, opacity: 0.75, dashArray: '6 6', interactive: false },
+    ).addTo(this.map);
   }
 
   /** SVG 上の座標を返す (デバッグ・診断用)。 */

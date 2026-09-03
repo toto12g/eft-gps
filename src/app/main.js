@@ -15,6 +15,7 @@ import { loadMapDb } from '../mapdb/index.js';
 import { validateSample, VERDICT, isDrawable, MapTracker } from '../verify/index.js';
 import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
+import { loadPins, savePins, addPin, removePin, pinBearing } from './pins.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -45,6 +46,9 @@ const state = {
   autoSwitch: (localStorage.getItem('eft-gps.autoSwitch') ?? '1') === '1',
   lastSample: null,
   lastModified: null,
+  pins: [],
+  activePinId: localStorage.getItem('eft-gps.activePin') || null,
+  placing: false,
   received: 0,
   skipped: 0,
 };
@@ -107,6 +111,7 @@ async function boot() {
   state.view.factions = new Set(state.factions);
 
   setupGuide();
+  setupPins();
   setupWatcher();
 
   await selectMap(state.selectedKey);
@@ -119,6 +124,100 @@ async function boot() {
     handleInput(preset);
   }
   document.title = `EFT 測位クライアント — ${state.selectedKey}`;
+}
+
+/* ------------------------------------------------------------------ ピン */
+
+function setupPins() {
+  state.view.onMapClick = (world) => {
+    const name = prompt('ピンの名前（タスク名や目的地）', `目的地 ${state.pins.length + 1}`);
+    if (name === null) return; // キャンセル
+    // 高さは、直前のサンプルがあればその値を使う。2D の距離計算には影響しない。
+    const y = state.lastSample ? state.lastSample.y : 0;
+    state.pins = addPin(state.pins, { name, x: world.x, y, z: world.z });
+    savePins(state.selectedKey, state.pins);
+    setPlacing(false);
+    renderPins();
+  };
+
+  state.view.onPinClick = (id) => {
+    state.activePinId = state.activePinId === id ? null : id;
+    localStorage.setItem('eft-gps.activePin', state.activePinId || '');
+    renderPins();
+  };
+
+  $('btn-place').addEventListener('click', () => setPlacing(!state.placing));
+  $('btn-pins-clear').addEventListener('click', () => {
+    if (!state.pins.length) return;
+    if (!confirm(`${state.selectedKey} のピン ${state.pins.length} 個をすべて消します。よろしいですか？`)) return;
+    state.pins = [];
+    savePins(state.selectedKey, state.pins);
+    renderPins();
+  });
+}
+
+function setPlacing(on) {
+  state.placing = on;
+  state.view.setPlacing(on);
+  $('btn-place').classList.toggle('on', on);
+  $('btn-place').textContent = on ? '地図をクリック…（もう一度押すと中止）' : '地図をクリックして置く';
+  $('pin-hint').textContent = on
+    ? '行きたい場所をクリックしてください。名前を聞かれます。'
+    : '地図上の行きたい場所をクリックすると印を置けます。';
+}
+
+function renderPins() {
+  state.view.setPins(state.pins, state.activePinId);
+
+  const box = $('pins');
+  box.innerHTML = '';
+  if (!state.pins.length) {
+    $('btn-pins-clear').disabled = true;
+    return;
+  }
+  $('btn-pins-clear').disabled = false;
+
+  const s = state.lastSample;
+  const yaw = s ? headingOf(s) : null;
+
+  for (const pin of state.pins) {
+    const row = document.createElement('div');
+    row.className = 'pin-row' + (pin.id === state.activePinId ? ' active' : '');
+
+    let dist = '—';
+    if (s) {
+      const b = pinBearing(s, pin, yaw);
+      dist = `${b.dist.toFixed(0)}m ${b.bearing.toFixed(0)}°`;
+      if (b.relative !== null) dist += `（${relativeText(b.relative)}）`;
+    }
+
+    row.innerHTML =
+      `<span class="nm" title="${escapeHtml(pin.name)}">${escapeHtml(pin.name)}</span>` +
+      `<span class="dist">${escapeHtml(dist)}</span>`;
+
+    const ops = document.createElement('span');
+    ops.className = 'ops';
+    const goto = document.createElement('button');
+    goto.type = 'button';
+    goto.textContent = pin.id === state.activePinId ? '解除' : '目的地';
+    goto.addEventListener('click', () => state.view.onPinClick(pin.id));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = '削除';
+    del.addEventListener('click', () => {
+      state.pins = removePin(state.pins, pin.id);
+      if (state.activePinId === pin.id) state.activePinId = null;
+      savePins(state.selectedKey, state.pins);
+      renderPins();
+    });
+    ops.append(goto, del);
+    row.appendChild(ops);
+    box.appendChild(row);
+  }
+
+  // 目的地までの線
+  const active = state.pins.find((p) => p.id === state.activePinId);
+  state.view.drawRoute(s && active ? s : null, active || null);
 }
 
 /* -------------------------------------------------------- はじめての設定 */
@@ -279,6 +378,7 @@ async function applySample(sample, fileModifiedMs, live) {
   if (m && m.affine && isDrawable(verdict.verdict)) {
     state.view.setPlayer(sample, headingOf(sample), verdict.verdict === VERDICT.ACCEPT);
   }
+  renderPins(); // 現在地が動いたので距離と方位を出し直す
 }
 
 /**
@@ -320,6 +420,10 @@ async function selectMap(key) {
   } else {
     floors.disabled = true;
   }
+
+  state.pins = loadPins(key);
+  if (!state.pins.some((p) => p.id === state.activePinId)) state.activePinId = null;
+  renderPins();
 
   $('map-info').textContent = ok
     ? `${m.poiCount.toLocaleString()} POI / 脱出口 ${(m.extracts || []).length} / ` +
@@ -367,6 +471,16 @@ function renderSample(sample, verdict) {
           : `不一致（差 ${verdict.clock.diff.toFixed(2)} h）`,
       ]);
     }
+  }
+
+  const activePin = state.pins.find((p) => p.id === state.activePinId);
+  if (activePin && verdict && isDrawable(verdict.verdict)) {
+    const b = pinBearing(sample, activePin, yaw);
+    rows.push([
+      '目的地',
+      `${activePin.name}　${b.dist.toFixed(0)} m　方位 ${b.bearing.toFixed(0)}°` +
+        (b.relative === null ? '' : `（${relativeText(b.relative)}）`),
+    ]);
   }
 
   // 選択中のマップが違うなら、脱出口までの距離は別の座標系で計算した無意味な値になる。

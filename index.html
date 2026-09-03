@@ -125,6 +125,35 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 }
 .player-icon .unsure { opacity: .5; }
 
+/* ピン */
+.leaflet-container.placing-pin { cursor: crosshair; }
+.pin-icon > span { position: absolute; }
+.pin-icon .head {
+  left: -8px; top: -18px; width: 16px; height: 16px;
+  background: #ffc848; border: 2px solid #0a0c0d; border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 0 6px rgba(0,0,0,.8);
+}
+.pin-icon .label {
+  left: 12px; top: -20px; white-space: nowrap;
+  font: 600 12px/1.4 var(--mono); color: #ffc848;
+  text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
+}
+.pin-icon.active .head { background: #ff7a5c; width: 20px; height: 20px; left: -10px; top: -22px; }
+.pin-icon.active .label { color: #ff7a5c; font-size: 13px; }
+
+#pins { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
+.pin-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center;
+           padding: 5px 6px; border-radius: 2px; background: var(--panel-2);
+           font: 11px/1.5 var(--mono); }
+.pin-row.active { outline: 1px solid #ff7a5c; }
+.pin-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.pin-row .dist { color: var(--accent); font-variant-numeric: tabular-nums; }
+.pin-row .ops { display: flex; gap: 4px; }
+.pin-row button { width: auto; padding: 2px 6px; font-size: 10px; }
+.hint-line { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+#btn-place.on { color: var(--accent); border-color: var(--accent); }
+
 @media (max-width: 780px) {
   body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; }
   #map { height: 60vh; }
@@ -321,6 +350,16 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
   </div>
 
   <div><div id="status" class="status idle">待機中</div></div>
+
+  <div>
+    <label>ピン（タスクの目的地など）</label>
+    <div class="btn-row" style="margin-top:0">
+      <button type="button" id="btn-place">地図をクリックして置く</button>
+      <button type="button" id="btn-pins-clear">すべて消す</button>
+    </div>
+    <div id="pin-hint" class="hint-line">地図上の行きたい場所をクリックすると印を置けます。</div>
+    <div id="pins"></div>
+  </div>
 
   <div id="sample"><div class="hint">ファイル名を貼り付けるか、座標を入力してください。</div></div>
 
