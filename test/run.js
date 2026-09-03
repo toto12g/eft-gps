@@ -894,6 +894,79 @@ await check('監視できないブラウザを検出できる', () => {
   return `showDirectoryPicker: ${supported ? 'あり' : 'なし'}（このブラウザ）`;
 });
 
+/* --------------------------------------------------------------------- T14 */
+
+group('T14 表示名の解決');
+
+// tarkov.dev の API は翻訳キーを返す。辞書 (maps_ja / maps_en) を当てないと
+// 脱出口名が内部キーのまま出る。単に読みにくいだけでなく、Woods の
+// "Factory Gate" が実際には Friendship Bridge (Co-Op) だったように、
+// 別の場所の名前として読めてしまうものがある。
+await check('マップ名が翻訳キーのまま残っていない', () => {
+  const bad = db.maps.filter((m) => /^[0-9a-f]{24}\s+(Name|Description)$/.test(m.name || ''));
+  eq(bad.length, 0, `未解決: ${bad.map((m) => `${m.key}=${m.name}`).join(', ')}`);
+  const named = db.maps.filter((m) => m.name && m.name !== m.key);
+  truthy(named.length >= 10, `名前が付いたマップが少ない: ${named.length}`);
+  return `${named.length} マップ: ${named.slice(0, 4).map((m) => m.name).join(' / ')} …`;
+});
+
+await check('脱出口名に内部キーの痕跡が無い', () => {
+  // 内部キーに特徴的な形: snake_case、先頭が小文字の接頭辞、EXFIL_ 接頭辞など
+  const KEY_LIKE = [
+    /^EXFIL[_ ]/i,
+    /^(scav|lab|wood|woods|customs|streets|lighthouse|reserve|groundzero|shoreline|factory|labyrinth|labir)_/i,
+    /_(exit|free|scav|coop|secret|alp|sec)$/i,
+    /^E\d+(_|$)/,
+    /^Exit\d+$/i,
+  ];
+  const bad = [];
+  for (const m of db.maps) {
+    for (const e of m.extracts || []) {
+      const n = String(e.name || '');
+      if (KEY_LIKE.some((re) => re.test(n))) bad.push(`${m.key}/${n}`);
+    }
+  }
+  eq(bad.length, 0, `内部キーのまま: ${bad.slice(0, 8).join(', ')}${bad.length > 8 ? ` ほか ${bad.length - 8} 件` : ''}`);
+  const total = db.maps.reduce((n, m) => n + (m.extracts || []).length, 0);
+  return `${total} 件すべて解決済み`;
+});
+
+await check('既知の誤表示が直っている（回帰）', () => {
+  // 実際に間違って表示されていたもの。名前だけでなく場所も別だった。
+  const expect = [
+    ['woods', 'Friendship Bridge (Co-Op)', 'Factory Gate と表示されていた'],
+    ['woods', 'Eastern Rocks', 'West Border と表示されていた（東西が逆）'],
+    ['woods', 'Scav Bunker', 'East Gate と表示されていた'],
+    ['customs', 'Military Base CP', 'Shack と表示されていた'],
+    ['customs', 'Scav Checkpoint', 'Military Checkpoint と表示されていた'],
+    ['interchange', 'Emercom Checkpoint', 'SE Exfil と表示されていた'],
+    ['streets-of-tarkov', 'Stylobate Building Elevator', 'E1 と表示されていた'],
+    ['streets-of-tarkov', 'Entrance to Catacombs', 'scav_e2 と表示されていた'],
+    ['the-lab', 'Medical Block Elevator', 'lab_Elevator_Med と表示されていた'],
+  ];
+  const missing = [];
+  for (const [key, name, note] of expect) {
+    const m = db.byKey.get(key);
+    if (!m || !(m.extracts || []).some((e) => e.name === name)) missing.push(`${key}/${name}（${note}）`);
+  }
+  eq(missing.length, 0, `見つからない: ${missing.join(' , ')}`);
+  return `${expect.length} 件の既知の誤表示を確認`;
+});
+
+await check('校正の参照 ID は内部キーを使う', () => {
+  // 表示名が変わっても、既存の校正データの対応点が迷子にならないようにする
+  let withKey = 0;
+  let total = 0;
+  for (const m of db.maps) {
+    for (const e of m.extracts || []) {
+      total++;
+      if (e.key) withKey++;
+    }
+  }
+  eq(withKey, total, `key を持たない脱出口が ${total - withKey} 件`);
+  return `${total} 件すべてが表示名と内部キーの両方を持つ`;
+});
+
 /* --------------------------------------------------------------------- T13 */
 
 group('T13 配布物の整合 (PWA / 静的配信)');

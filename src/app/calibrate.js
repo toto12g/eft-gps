@@ -104,7 +104,7 @@ function collectRefs(map) {
   for (const e of map.extracts || []) {
     if (!e.position) continue;
     out.push({
-      id: 'extract:' + e.name,
+      id: 'extract:' + (e.key || e.name),
       label: String(e.name || '').replace(/^EXFIL[_ ]?/i, ''),
       kind: e.faction || 'extract',
       wx: e.position.x,

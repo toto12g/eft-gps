@@ -33,6 +33,11 @@ MAPS = ROOT / "maps"
 
 SRC_API = "https://json.tarkov.dev/regular/maps"
 SRC_MAPS_JSON = "https://raw.githubusercontent.com/the-hideout/tarkov-dev/main/src/data/maps.json"
+# 表示名の辞書。API 本体は翻訳キーを返すので、これを当てないと
+# 脱出口名が "scav_e2" や "Factory Gate" のような内部キーのままになる。
+# ("Factory Gate" は Woods の内部キーだが、正式名称は Friendship Bridge (Co-Op)。
+#  当てないと別の場所の名前に見えてしまう。)
+SRC_LANG = "https://json.tarkov.dev/regular/maps_{lang}"
 SRC_SVG = "https://raw.githubusercontent.com/the-hideout/tarkov-dev-svg-maps/main/"
 
 # 校正ツール (calibrate.html) が出した手動校正。解析的な初期値より優先する。
@@ -70,6 +75,60 @@ def fetch(url: str, name: str, refresh: bool) -> bytes:
         body = r.read()
     path.write_bytes(body)
     return body
+
+
+def resolve_path(node, parts):
+    """translations の JSONPath（$.a.b.*.c[*].d の形）を辿って、
+    書き換え可能な (入れ物, キー) を列挙する。必要な形だけを扱う小さな実装。"""
+    if not parts:
+        return
+    seg, rest = parts[0], parts[1:]
+
+    if seg == "*":
+        values = node.values() if isinstance(node, dict) else node if isinstance(node, list) else []
+        for v in values:
+            yield from resolve_path(v, rest)
+        return
+
+    m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\[\*\]$", seg)
+    if m:
+        lst = node.get(m.group(1)) if isinstance(node, dict) else None
+        if not isinstance(lst, list):
+            return
+        if rest:
+            for v in lst:
+                yield from resolve_path(v, rest)
+        else:
+            for i in range(len(lst)):
+                yield lst, i
+        return
+
+    if not isinstance(node, dict) or seg not in node:
+        return
+    if rest:
+        yield from resolve_path(node[seg], rest)
+    else:
+        yield node, seg
+
+
+def apply_translations(payload: dict, primary: dict, fallback: dict) -> int:
+    """payload["translations"] の指す文字列を辞書で置き換える。戻り値は置換件数。
+
+    tarkov-dev の src/modules/api-request.mjs と同じ考え方。優先言語 → 英語 →
+    元のキー、の順に当てる。当たらなくても壊さない。
+    """
+    replaced = 0
+    for jpath in payload.get("translations") or []:
+        parts = jpath.lstrip("$.").split(".")
+        for container, key in resolve_path(payload, parts):
+            val = container[key]
+            if not isinstance(val, str):
+                continue
+            new = primary.get(val) or fallback.get(val)
+            if new and new != val:
+                container[key] = new
+                replaced += 1
+    return replaced
 
 
 def collect_points(scene: dict):
@@ -229,7 +288,12 @@ def build():
     args = ap.parse_args()
 
     print("sources", file=sys.stderr)
-    api = json.loads(fetch(SRC_API, "api_maps.json", args.refresh))["data"]
+    api_payload = json.loads(fetch(SRC_API, "api_maps.json", args.refresh))
+    lang_ja = json.loads(fetch(SRC_LANG.format(lang="ja"), "maps_ja.json", args.refresh))["data"]
+    lang_en = json.loads(fetch(SRC_LANG.format(lang="en"), "maps_en.json", args.refresh))["data"]
+    n = apply_translations(api_payload, lang_ja, lang_en)
+    print(f"  表示名を解決: {n} 件（日本語優先・英語フォールバック）", file=sys.stderr)
+    api = api_payload["data"]
     tdmaps = json.loads(fetch(SRC_MAPS_JSON, "maps.json", args.refresh))
     overrides = {}
     if OVERRIDES.exists():
@@ -264,6 +328,9 @@ def build():
             m["extracts"] = [
                 {
                     "name": e.get("name"),
+                    # 内部キーも残す。校正ツールの参照 ID に使うため、
+                    # 表示名が変わっても対応点が迷子にならない。
+                    "key": e.get("id") or e.get("name"),
                     "faction": e.get("faction"),
                     "position": e.get("position"),
                     "outline": e.get("outline") or [],

@@ -63,7 +63,8 @@ async function boot() {
   for (const m of state.db.maps) {
     const opt = document.createElement('option');
     opt.value = m.key;
-    opt.textContent = m.affine ? m.key : `${m.key}（地図なし）`;
+    const label = m.name && !/^[0-9a-f]{24} /.test(m.name) ? `${m.name}（${m.key}）` : m.key;
+    opt.textContent = m.affine ? label : `${label}／地図なし`;
     sel.appendChild(opt);
   }
   if (!state.db.byKey.has(state.selectedKey)) state.selectedKey = state.db.maps[0].key;
