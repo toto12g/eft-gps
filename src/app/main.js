@@ -15,7 +15,8 @@ import { loadMapDb } from '../mapdb/index.js';
 import { validateSample, VERDICT, isDrawable, MapTracker } from '../verify/index.js';
 import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
-import { loadPins, savePins, addPin, removePin, pinBearing } from './pins.js';
+import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
+import { loadTasks, filterTasks, taskLabel, objectiveGeometry, OBJECTIVE_TYPE } from './tasks.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,6 +48,9 @@ const state = {
   lastSample: null,
   lastModified: null,
   pins: [],
+  tasks: [],
+  taskFilter: '',
+  activeTask: null,
   activePinId: localStorage.getItem('eft-gps.activePin') || null,
   placing: false,
   received: 0,
@@ -112,11 +116,16 @@ async function boot() {
 
   setupGuide();
   setupPins();
+  setupTasks();
   setupWatcher();
 
   await selectMap(state.selectedKey);
   tickClock();
   setInterval(tickClock, 1000);
+
+  // ?task=<id> でタスクを指定できる。特定の目標地点を人に見せるときに使える。
+  const wantTask = params.get('task');
+  if (wantTask && state.tasks.some((t) => t.id === wantTask)) selectTask(wantTask);
 
   const preset = params.get('sample');
   if (preset) {
@@ -126,18 +135,124 @@ async function boot() {
   document.title = `EFT 測位クライアント — ${state.selectedKey}`;
 }
 
+/* -------------------------------------------------------------- タスク */
+
+function setupTasks() {
+  $('task-filter').addEventListener('input', (ev) => {
+    state.taskFilter = ev.target.value;
+    renderTaskOptions();
+  });
+  $('task-select').addEventListener('change', (ev) => selectTask(ev.target.value));
+  $('btn-task-clear').addEventListener('click', () => selectTask(''));
+}
+
+/** そのマップのタスクを読み込んで一覧を作る。 */
+async function loadMapTasks(mapData) {
+  state.activeTask = null;
+  state.tasks = await loadTasks(mapData.key, mapData.taskFile);
+  $('task-filter').value = state.taskFilter = '';
+  renderTaskOptions();
+  renderObjectives();
+  $('task-wiki').hidden = true;
+  state.view.setTask(null, state.selectedKey);
+}
+
+function renderTaskOptions() {
+  const sel = $('task-select');
+  const shown = filterTasks(state.tasks, state.taskFilter);
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = state.tasks.length
+    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件）—`
+    : '— このマップに目標地点のあるタスクはありません —';
+  sel.appendChild(none);
+  for (const t of shown) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = taskLabel(t);
+    sel.appendChild(opt);
+  }
+  sel.disabled = !state.tasks.length;
+  sel.value = state.activeTask ? state.activeTask.id : '';
+}
+
+function selectTask(id) {
+  state.activeTask = id ? state.tasks.find((t) => t.id === id) || null : null;
+  $('task-select').value = id || '';
+  const wiki = $('task-wiki');
+  wiki.hidden = !(state.activeTask && state.activeTask.w);
+  if (!wiki.hidden) wiki.href = state.activeTask.w;
+  state.view.setTask(state.activeTask, state.selectedKey, focusObjective);
+  renderObjectives();
+}
+
+/** 目標 i の地点へ地図を寄せる。 */
+function focusObjective(i) {
+  if (!state.activeTask) return;
+  const g = objectiveGeometry(state.activeTask.o[i], state.selectedKey);
+  const p = g.zones[0] ? { x: g.zones[0].p[0], z: g.zones[0].p[2] }
+    : g.spots[0] ? { x: g.spots[0][0], z: g.spots[0][2] } : null;
+  if (p) state.view.focusWorld(p.x, p.z);
+}
+
+function renderObjectives() {
+  const box = $('task-objectives');
+  box.innerHTML = '';
+  if (!state.activeTask) return;
+
+  const s = state.lastSample;
+  const yaw = s ? headingOf(s) : null;
+
+  state.activeTask.o.forEach((objective, i) => {
+    const g = objectiveGeometry(objective, state.selectedKey);
+    const here = g.zones.length > 0 || g.spots.length > 0;
+
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'obj-row' + (here ? '' : ' away');
+
+    // 現在地からいちばん近い地点までの距離
+    const spotCount = g.zones.length + g.spots.length;
+    let meta = here ? (OBJECTIVE_TYPE[objective.t] || objective.t || '') : '別マップ';
+    if (here && s) {
+      const pts = [
+        ...g.zones.map((z) => ({ x: z.p[0], z: z.p[2] })),
+        ...g.spots.map((p) => ({ x: p[0], z: p[2] })),
+      ];
+      let best = null;
+      for (const p of pts) {
+        const b = pinBearing(s, { x: p.x, z: p.z }, yaw);
+        if (!best || b.dist < best.dist) best = b;
+      }
+      if (best) {
+        meta = `${best.dist.toFixed(0)}m ${best.bearing.toFixed(0)}°`;
+        if (best.relative !== null) meta += `（${relativeText(best.relative)}）`;
+      }
+    }
+
+    row.innerHTML =
+      `<span class="n">${i + 1}</span>` +
+      `<span class="d">${escapeHtml(objective.d || '')}${objective.opt ? '（任意）' : ''}` +
+      `${spotCount > 1 ? `<em class="cnt">${spotCount} 箇所</em>` : ''}</span>` +
+      `<span class="m">${escapeHtml(meta)}</span>`;
+    if (here) row.addEventListener('click', () => focusObjective(i));
+    else row.disabled = true;
+    box.appendChild(row);
+  });
+}
+
 /* ------------------------------------------------------------------ ピン */
 
 function setupPins() {
   state.view.onMapClick = (world) => {
-    const name = prompt('ピンの名前（タスク名や目的地）', `目的地 ${state.pins.length + 1}`);
-    if (name === null) return; // キャンセル
-    // 高さは、直前のサンプルがあればその値を使う。2D の距離計算には影響しない。
+    // 名前は聞かない。連続で置けるようにするため、まず刺してから
+    // 一覧で書き換えてもらう。名前を毎回聞くと 1 本ごとに手が止まる。
     const y = state.lastSample ? state.lastSample.y : 0;
-    state.pins = addPin(state.pins, { name, x: world.x, y, z: world.z });
+    state.pins = addPin(state.pins, { name: `ピン ${state.pins.length + 1}`, x: world.x, y, z: world.z });
     savePins(state.selectedKey, state.pins);
-    setPlacing(false);
     renderPins();
+    // モードは切らない。オフにするまで置き続けられる。
   };
 
   state.view.onPinClick = (id) => {
@@ -147,6 +262,9 @@ function setupPins() {
   };
 
   $('btn-place').addEventListener('click', () => setPlacing(!state.placing));
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && state.placing) setPlacing(false);
+  });
   $('btn-pins-clear').addEventListener('click', () => {
     if (!state.pins.length) return;
     if (!confirm(`${state.selectedKey} のピン ${state.pins.length} 個をすべて消します。よろしいですか？`)) return;
@@ -159,11 +277,14 @@ function setupPins() {
 function setPlacing(on) {
   state.placing = on;
   state.view.setPlacing(on);
-  $('btn-place').classList.toggle('on', on);
-  $('btn-place').textContent = on ? '地図をクリック…（もう一度押すと中止）' : '地図をクリックして置く';
-  $('pin-hint').textContent = on
-    ? '行きたい場所をクリックしてください。名前を聞かれます。'
-    : '地図上の行きたい場所をクリックすると印を置けます。';
+  const btn = $('btn-place');
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.querySelector('.txt').textContent = on ? 'ピンを置く（オン）' : 'ピンを置く';
+  const hint = $('pin-hint');
+  hint.classList.toggle('on', on);
+  hint.textContent = on
+    ? 'オン。地図をクリックするたびに刺さります。ドラッグでの移動と拡大はそのまま使えます。もう一度押すか Esc で終了。'
+    : 'ピンを置くを押してから地図をクリックします。';
 }
 
 function renderPins() {
@@ -191,9 +312,15 @@ function renderPins() {
       if (b.relative !== null) dist += `（${relativeText(b.relative)}）`;
     }
 
-    row.innerHTML =
-      `<span class="nm" title="${escapeHtml(pin.name)}">${escapeHtml(pin.name)}</span>` +
-      `<span class="dist">${escapeHtml(dist)}</span>`;
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = pin.name;
+    nm.title = 'クリックで名前を変更';
+    nm.addEventListener('click', () => startRename(nm, pin));
+    const ds = document.createElement('span');
+    ds.className = 'dist';
+    ds.textContent = dist;
+    row.append(nm, ds);
 
     const ops = document.createElement('span');
     ops.className = 'ops';
@@ -218,6 +345,36 @@ function renderPins() {
   // 目的地までの線
   const active = state.pins.find((p) => p.id === state.activePinId);
   state.view.drawRoute(s && active ? s : null, active || null);
+}
+
+/** 一覧の名前をその場で書き換える。 */
+function startRename(span, pin) {
+  const input = document.createElement('input');
+  input.className = 'rename';
+  input.value = pin.name;
+  input.setAttribute('aria-label', 'ピンの名前');
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const commit = (save) => {
+    if (done) return;
+    done = true;
+    if (save) {
+      state.pins = renamePin(state.pins, pin.id, input.value);
+      savePins(state.selectedKey, state.pins);
+    }
+    renderPins();
+  };
+  input.addEventListener('blur', () => commit(true));
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') commit(true);
+    if (ev.key === 'Escape') {
+      ev.stopPropagation(); // ピン設置モードの解除まで巻き込まない
+      commit(false);
+    }
+  });
 }
 
 /* -------------------------------------------------------- はじめての設定 */
@@ -379,6 +536,7 @@ async function applySample(sample, fileModifiedMs, live) {
     state.view.setPlayer(sample, headingOf(sample), verdict.verdict === VERDICT.ACCEPT);
   }
   renderPins(); // 現在地が動いたので距離と方位を出し直す
+  renderObjectives();
 }
 
 /**
@@ -424,10 +582,11 @@ async function selectMap(key) {
   state.pins = loadPins(key);
   if (!state.pins.some((p) => p.id === state.activePinId)) state.activePinId = null;
   renderPins();
+  await loadMapTasks(m);
 
   $('map-info').textContent = ok
     ? `${m.poiCount.toLocaleString()} POI / 脱出口 ${(m.extracts || []).length} / ` +
-      `${m.scenes.map((s) => s.nameId).join(', ')}`
+      `タスク ${m.taskCount || 0} / ${m.scenes.map((s) => s.nameId).join(', ')}`
     : `${m.poiCount.toLocaleString()} POI / 地図画像なし（測位と検証は動く）`;
 }
 

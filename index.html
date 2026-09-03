@@ -152,7 +152,58 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 .pin-row .ops { display: flex; gap: 4px; }
 .pin-row button { width: auto; padding: 2px 6px; font-size: 10px; }
 .hint-line { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 6px; }
-#btn-place.on { color: var(--accent); border-color: var(--accent); }
+
+/* タスク */
+.task-icon > span { position: absolute; }
+.task-icon .num {
+  left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 50%;
+  background: #b48cff; color: #14101f; border: 2px solid #0a0c0d;
+  font: 700 11px/17px var(--mono); text-align: center;
+  box-shadow: 0 0 7px rgba(180,140,255,.7);
+}
+.task-icon .label {
+  left: 14px; top: -9px; max-width: 260px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font: 600 11px/1.4 var(--mono); color: #cdb4ff;
+  text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
+}
+#task-objectives { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
+.obj-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: baseline;
+           padding: 5px 6px; background: var(--panel-2); border-radius: 2px; cursor: pointer;
+           text-align: left; border: 0; width: 100%; }
+.obj-row:hover { outline: 1px solid #b48cff; }
+.obj-row .n { color: #b48cff; font: 700 10px/1.5 var(--mono); }
+.obj-row .d { font: 11px/1.5 var(--sans); color: var(--ink); }
+.obj-row .m { font: 10px/1.5 var(--mono); color: var(--muted); white-space: nowrap; }
+.obj-row.away .d { color: var(--muted); }
+.obj-row .cnt { display: inline-block; margin-left: 6px; font-style: normal;
+                font: 10px/1.4 var(--mono); color: #b48cff; }
+.wiki-link { flex: none; display: inline-flex; align-items: center; padding: 6px 10px;
+             font: 12px/1.5 var(--mono); color: var(--muted); text-decoration: none;
+             border: 1px solid var(--rule); border-radius: 2px; }
+.wiki-link:hover { color: var(--accent); border-color: var(--accent); }
+/* class の display が [hidden] を打ち消してしまうので明示する */
+.wiki-link[hidden] { display: none; }
+.pin-tools { display: flex; gap: 8px; align-items: stretch; }
+.pin-tools > button { flex: 1; }
+.pin-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.pin-toggle .glyph {
+  width: 11px; height: 11px; flex: none;
+  background: currentColor; border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg); opacity: .55;
+}
+.pin-toggle[aria-pressed="true"] {
+  color: #ffc848; border-color: #ffc848; background: #2a2416;
+}
+.pin-toggle[aria-pressed="true"] .glyph { opacity: 1; }
+#pin-hint.on { color: #ffc848; }
+
+/* 一覧の名前はクリックで書き換えられる */
+.pin-row .nm { cursor: text; }
+.pin-row .nm:hover { color: var(--accent); }
+.pin-row input.rename {
+  width: 100%; padding: 1px 4px; font: 11px/1.5 var(--mono);
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 2px; color: var(--ink);
+}
 
 @media (max-width: 780px) {
   body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; }
@@ -352,12 +403,27 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
   <div><div id="status" class="status idle">待機中</div></div>
 
   <div>
+    <label for="task-select">タスクの目標地点</label>
+    <input type="search" id="task-filter" placeholder="タスク名・トレーダー・目標で絞り込む" autocomplete="off">
+    <select id="task-select" style="margin-top:8px"></select>
+    <div class="btn-row">
+      <button type="button" id="btn-task-clear">解除</button>
+      <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
+    </div>
+    <div id="task-objectives"></div>
+  </div>
+
+  <div>
     <label>ピン（タスクの目的地など）</label>
-    <div class="btn-row" style="margin-top:0">
-      <button type="button" id="btn-place">地図をクリックして置く</button>
+    <div class="pin-tools">
+      <button type="button" id="btn-place" class="pin-toggle" aria-pressed="false"
+              title="オンにすると、地図をクリックするたびにピンが刺さります">
+        <span class="glyph" aria-hidden="true"></span>
+        <span class="txt">ピンを置く</span>
+      </button>
       <button type="button" id="btn-pins-clear">すべて消す</button>
     </div>
-    <div id="pin-hint" class="hint-line">地図上の行きたい場所をクリックすると印を置けます。</div>
+    <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
     <div id="pins"></div>
   </div>
 

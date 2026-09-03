@@ -38,6 +38,9 @@ SRC_MAPS_JSON = "https://raw.githubusercontent.com/the-hideout/tarkov-dev/main/s
 # ("Factory Gate" は Woods の内部キーだが、正式名称は Friendship Bridge (Co-Op)。
 #  当てないと別の場所の名前に見えてしまう。)
 SRC_LANG = "https://json.tarkov.dev/regular/maps_{lang}"
+SRC_TASKS = "https://json.tarkov.dev/regular/tasks"
+SRC_TASKS_LANG = "https://json.tarkov.dev/regular/tasks_{lang}"
+SRC_TRADERS = "https://json.tarkov.dev/regular/traders"
 SRC_SVG = "https://raw.githubusercontent.com/the-hideout/tarkov-dev-svg-maps/main/"
 
 # 校正ツール (calibrate.html) が出した手動校正。解析的な初期値より優先する。
@@ -129,6 +132,114 @@ def apply_translations(payload: dict, primary: dict, fallback: dict) -> int:
                 container[key] = new
                 replaced += 1
     return replaced
+
+
+def build_tasks(refresh: bool, id_to_key: dict):
+    """クエストの目標地点をマップごとに切り出す。
+
+    tarkov.dev の tasks には目標ゾーン (position + outline) と、
+    アイテムの設置候補地点 (possibleLocations) が入っている。
+    マップごとに分けて data/tasks/<key>.json に書き、アプリ側では
+    そのマップを開いたときだけ読む。全部で 180KB ほどなので、
+    初期表示には影響させない。
+    """
+    payload = json.loads(fetch(SRC_TASKS, "tasks.json", refresh))
+    ja = json.loads(fetch(SRC_TASKS_LANG.format(lang="ja"), "tasks_ja.json", refresh))["data"]
+    en = json.loads(fetch(SRC_TASKS_LANG.format(lang="en"), "tasks_en.json", refresh))["data"]
+    n = apply_translations(payload, ja, en)
+    print(f"  タスクの表示名を解決: {n} 件", file=sys.stderr)
+
+    traders = json.loads(fetch(SRC_TRADERS, "traders.json", refresh))
+    traders = traders.get("data", traders)
+    trader_name = {
+        k: (v.get("normalizedName") or "?").replace("-", " ").title() for k, v in traders.items()
+    }
+
+    tasks = payload["data"]["tasks"]
+    tasks = list(tasks.values()) if isinstance(tasks, dict) else (tasks or [])
+
+    def rnd(v):
+        return round(float(v), 1)
+
+    by_map = {}
+    zones = points = 0
+    for t in tasks:
+        objectives = []
+        for o in t.get("objectives") or []:
+            zs, locs = [], []
+            for z in o.get("zones") or []:
+                key = id_to_key.get(z.get("map"))
+                pos = z.get("position")
+                if not key or not pos:
+                    continue
+                zs.append({
+                    "m": key,
+                    "p": [rnd(pos["x"]), rnd(pos["y"]), rnd(pos["z"])],
+                    "o": [[rnd(v["x"]), rnd(v["z"])] for v in (z.get("outline") or [])],
+                })
+                zones += 1
+            for loc in o.get("possibleLocations") or []:
+                key = id_to_key.get(loc.get("map"))
+                if not key:
+                    continue
+                ps = [[rnd(p["x"]), rnd(p["y"]), rnd(p["z"])] for p in (loc.get("positions") or [])]
+                if ps:
+                    locs.append({"m": key, "p": ps})
+                    points += len(ps)
+            if not zs and not locs:
+                continue
+            entry = {"d": o.get("description"), "t": o.get("type")}
+            if o.get("optional"):
+                entry["opt"] = 1
+            if zs:
+                entry["z"] = zs
+            if locs:
+                entry["l"] = locs
+            objectives.append(entry)
+
+        if not objectives:
+            continue
+
+        rec = {
+            "id": t.get("id"),
+            "n": t.get("name"),
+            "tr": trader_name.get(t.get("trader"), "?"),
+            "lv": t.get("minPlayerLevel"),
+            "o": objectives,
+        }
+        if t.get("kappaRequired"):
+            rec["k"] = 1
+        if t.get("wikiLink"):
+            rec["w"] = t["wikiLink"]
+
+        # この課題がどのマップに関わるか
+        keys = set()
+        for obj in objectives:
+            for z in obj.get("z", []):
+                keys.add(z["m"])
+            for loc in obj.get("l", []):
+                keys.add(loc["m"])
+        for key in keys:
+            by_map.setdefault(key, []).append(rec)
+
+    out_dir = DATA / "tasks"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for stale in out_dir.glob("*.json"):
+        stale.unlink()
+
+    counts = {}
+    for key, recs in by_map.items():
+        # トレーダー → 必要レベル → 名前 の順に並べておく。UI 側で並べ替えなくて済む
+        recs.sort(key=lambda r: (r["tr"], r.get("lv") or 0, r["n"] or ""))
+        (out_dir / f"{key}.json").write_text(
+            json.dumps(recs, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+        )
+        counts[key] = len(recs)
+
+    total = sum((out_dir / f"{k}.json").stat().st_size for k in counts)
+    print(f"  タスク {sum(counts.values())} 件 / ゾーン {zones} / 候補点 {points} "
+          f"/ {len(counts)} ファイル {total:,} バイト", file=sys.stderr)
+    return counts
 
 
 def collect_points(scene: dict):
@@ -309,6 +420,13 @@ def build():
             if sub.get("projection") == "interactive":
                 interactive[sub["key"]] = sub
 
+    # マップ ID → こちらのキー（統合後）
+    id_to_key = {}
+    for scene in api["maps"].values():
+        name = scene["normalizedName"]
+        id_to_key[scene["id"]] = SCENE_ALIASES.get(name, name)
+    task_counts = build_tasks(args.refresh, id_to_key)
+
     # シーンを統合先ごとにまとめる
     merged: dict[str, dict] = {}
     for scene in api["maps"].values():
@@ -419,6 +537,8 @@ def build():
                 "z": [round(min(zs), 2), round(max(zs), 2)],
             },
             "extracts": m.get("extracts", []),
+            "taskCount": task_counts.get(key, 0),
+            "taskFile": f"data/tasks/{key}.json" if task_counts.get(key) else None,
             "affine": affine,
             "rms": (ov or {}).get("rms"),
             "calib": calib,

@@ -13,7 +13,7 @@
  * 資産は 2MB ほどしかないので、この方式でも体感は変わらない。
  */
 
-const VERSION = 'eft-gps-v2';
+const VERSION = 'eft-gps-v3';
 
 /** 最初に取り込んでおくもの。ここに無いものも、一度読めばキャッシュに入る。 */
 const PRECACHE = [
@@ -40,11 +40,21 @@ const PRECACHE = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches
-      .open(VERSION)
-      // 1 つでも失敗すると addAll 全体が落ちるので、個別に入れて失敗は無視する
-      .then((cache) => Promise.all(PRECACHE.map((url) => cache.add(url).catch(() => {}))))
-      .then(() => self.skipWaiting()),
+    (async () => {
+      const cache = await caches.open(VERSION);
+      await Promise.all(PRECACHE.map((url) => cache.add(url).catch(() => {})));
+
+      // タスクのデータはマップごとに分かれている。一覧を手で持つと
+      // マップが増えたときに更新し忘れるので、mapdb から拾う。
+      try {
+        const db = await cache.match('./data/mapdb.json').then((r) => r && r.json());
+        const files = (db?.maps || []).map((m) => m.taskFile).filter(Boolean);
+        await Promise.all(files.map((f) => cache.add('./' + f).catch(() => {})));
+      } catch {
+        /* 取れなくても本体は動く。使うときに取りに行く */
+      }
+      await self.skipWaiting();
+    })(),
   );
 });
 

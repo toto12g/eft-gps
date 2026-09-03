@@ -55,6 +55,7 @@ export class MapView {
     this.trail = [];
     this.pinLayer = null;
     this.routeLayer = null;
+    this.taskLayer = null;
     /** 表示する脱出口の陣営 */
     this.factions = new Set(['pmc', 'scav', 'shared']);
 
@@ -83,7 +84,7 @@ export class MapView {
   async setMap(mapData) {
     this.mapData = mapData;
     this.trail = [];
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer']) {
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -251,6 +252,73 @@ export class MapView {
         this.onPinClick(pin.id);
       });
     }
+  }
+
+  /**
+   * 選択中のタスクの目標地点を描く。
+   * @param {Object|null} task
+   * @param {string} mapKey
+   * @param {(index:number) => void} [onPick] 目標をクリックしたとき
+   */
+  setTask(task, mapKey, onPick = () => {}) {
+    const L = this.L;
+    if (this.taskLayer) this.taskLayer.remove();
+    this.taskLayer = null;
+    if (!task || !this.mapData || !this.mapData.affine) return;
+
+    const aff = this.mapData.affine;
+    this.taskLayer = L.layerGroup().addTo(this.map);
+    const COLOR = '#b48cff'; // 脱出口（緑/橙/黄）ともピン（琥珀）とも被らない色
+
+    (task.o || []).forEach((objective, i) => {
+      const zones = (objective.z || []).filter((z) => z.m === mapKey);
+      const spots = [];
+      for (const loc of objective.l || []) if (loc.m === mapKey) spots.push(...loc.p);
+      const label = `${i + 1}. ${objective.d || ''}`;
+
+      // 同じ目標が何十箇所もあることがある（BTR の停車地点など）。
+      // そこに毎回説明文を描くと地図が文字で埋まって読めなくなるので、
+      // 地点が少ないときだけ文字を出し、多いときは番号だけにする。
+      // 説明はホバーのツールチップと左の一覧で読める。
+      const showText = zones.length <= 2;
+
+      for (const z of zones) {
+        if ((z.o || []).length >= 3) {
+          L.polygon(z.o.map((v) => worldToLatLng(aff, v[0], v[1])), {
+            color: COLOR, weight: 2, fillOpacity: 0.28, interactive: false,
+          }).addTo(this.taskLayer);
+        }
+        const marker = L.marker(worldToLatLng(aff, z.p[0], z.p[2]), {
+          icon: L.divIcon({
+            className: 'task-icon',
+            html:
+              `<span class="num">${i + 1}</span>` +
+              (showText ? `<span class="label">${escapeHtml(objective.d || '')}</span>` : ''),
+            iconSize: [0, 0],
+          }),
+          zIndexOffset: 700,
+        }).addTo(this.taskLayer);
+        marker.bindTooltip(escapeHtml(label));
+        marker.on('click', (ev) => {
+          if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+          onPick(i);
+        });
+      }
+
+      for (const s of spots) {
+        L.circleMarker(worldToLatLng(aff, s[0], s[2]), {
+          radius: 4, color: COLOR, weight: 2, fillOpacity: 0.5, interactive: false,
+        }).addTo(this.taskLayer);
+      }
+    });
+  }
+
+  /** 指定のワールド座標へ寄る。 */
+  focusWorld(x, z) {
+    if (!this.mapData || !this.mapData.affine) return;
+    this.map.setView(worldToLatLng(this.mapData.affine, x, z), Math.max(this.map.getZoom(), 1), {
+      animate: true,
+    });
   }
 
   /** 目的地までの線を現在地から引く。 */

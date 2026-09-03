@@ -33,6 +33,7 @@ import { loadMapDb, rankMaps, nearestPoiDistance } from '../src/mapdb/index.js';
 import { validateSample, VERDICT, MapTracker } from '../src/verify/index.js';
 import { ScreenshotWatcher, isSupported } from '../src/watch/index.js';
 import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '../src/app/pins.js';
+import { loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints, OBJECTIVE_TYPE } from '../src/app/tasks.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
 
@@ -893,6 +894,129 @@ await check('監視できないブラウザを検出できる', () => {
   const supported = isSupported();
   truthy(typeof supported === 'boolean', '真偽値を返す');
   return `showDirectoryPicker: ${supported ? 'あり' : 'なし'}（このブラウザ）`;
+});
+
+/* --------------------------------------------------------------------- T16 */
+
+group('T16 タスクの目標地点');
+
+// テストページは /test/ 配下にあるので、アプリ（ルート）より 1 段深い
+const customsTasks = await loadTasks('customs', '../data/tasks/customs.json');
+
+await check('マップごとのタスクファイルが読める', async () => {
+  truthy(customsTasks.length > 20, `Customs のタスクが少ない: ${customsTasks.length}`);
+  const withFile = db.maps.filter((m) => m.taskFile);
+  truthy(withFile.length >= 10, `taskFile を持つマップが少ない: ${withFile.length}`);
+  let sum = 0;
+  for (const m of withFile) {
+    const list = await loadTasks(m.key, '../' + m.taskFile);
+    eq(list.length, m.taskCount, `${m.key} の件数が mapdb と食い違う`);
+    sum += list.length;
+  }
+  return `${withFile.length} マップ / のべ ${sum} タスク（Customs ${customsTasks.length} 件）`;
+});
+
+await check('タスク名と目標の説明が翻訳済み', () => {
+  const badName = customsTasks.filter((t) => /^[0-9a-f]{24}\s+name$/i.test(t.n || ''));
+  eq(badName.length, 0, `未翻訳のタスク名: ${badName.length} 件`);
+  let objs = 0;
+  const badDesc = [];
+  for (const t of customsTasks) {
+    for (const o of t.o || []) {
+      objs++;
+      if (/^[0-9a-f]{24}$/i.test(o.d || '')) badDesc.push(o.d);
+    }
+  }
+  eq(badDesc.length, 0, `未翻訳の目標説明: ${badDesc.length} 件`);
+  return `タスク ${customsTasks.length} / 目標 ${objs} 件すべて解決済み`;
+});
+
+await check('目標の地点が正しいマップの範囲に入っている', () => {
+  const m = db.byKey.get('customs');
+  const b = m.bbox;
+  const margin = 200; // 座標は丸めてあるうえ、地図外の演出用ゾーンもありうる
+  let checked = 0;
+  const out = [];
+  for (const t of customsTasks) {
+    for (const o of t.o || []) {
+      const g = objectiveGeometry(o, 'customs');
+      for (const z of g.zones) {
+        checked++;
+        const [x, , z2] = z.p;
+        if (x < b.x[0] - margin || x > b.x[1] + margin || z2 < b.z[0] - margin || z2 > b.z[1] + margin) {
+          out.push(`${t.n}: ${x},${z2}`);
+        }
+      }
+    }
+  }
+  truthy(checked > 40, `検査したゾーンが少ない: ${checked}`);
+  eq(out.length, 0, `範囲外: ${out.slice(0, 3).join(' / ')}`);
+  return `${checked} ゾーンすべてが Customs の範囲内`;
+});
+
+await check('別マップの地点は混ざらない', () => {
+  // 複数マップにまたがるタスクでも、objectiveGeometry は指定マップぶんだけ返す
+  const multi = customsTasks.find((t) =>
+    (t.o || []).some((o) => (o.z || []).some((z) => z.m !== 'customs')),
+  );
+  truthy(multi, '複数マップにまたがるタスクが見つからない');
+  let mine = 0;
+  let theirs = 0;
+  for (const o of multi.o) {
+    const g = objectiveGeometry(o, 'customs');
+    mine += g.zones.length;
+    theirs += (o.z || []).filter((z) => z.m !== 'customs').length;
+  }
+  truthy(theirs > 0, '別マップの地点が無い');
+  for (const o of multi.o) {
+    for (const z of objectiveGeometry(o, 'customs').zones) {
+      eq(z.m, 'customs', '別マップの地点が混ざった');
+    }
+  }
+  return `「${multi.n}」 Customs ${mine} 箇所 / 他マップ ${theirs} 箇所を分離`;
+});
+
+await check('検索でタスクを絞れる', () => {
+  eq(filterTasks(customsTasks, '').length, customsTasks.length, '空検索は全件');
+  const byTrader = filterTasks(customsTasks, 'prapor');
+  truthy(byTrader.length > 0, 'トレーダー名で引けない');
+  truthy(byTrader.every((t) => t.tr.toLowerCase().includes('prapor')), '無関係なものが混ざる');
+  const byName = filterTasks(customsTasks, customsTasks[0].n.slice(0, 6));
+  truthy(byName.length > 0, 'タスク名で引けない');
+  const none = filterTasks(customsTasks, 'zzzzzz該当なしzzzzzz');
+  eq(none.length, 0, '該当なしのとき 0 件');
+  return `prapor で ${byTrader.length} 件 / 該当なしは 0 件`;
+});
+
+await check('一覧ラベルにトレーダーとレベルが入る', () => {
+  const t = customsTasks.find((x) => x.lv);
+  const label = taskLabel(t);
+  truthy(label.includes(t.tr), 'トレーダー名が無い');
+  truthy(label.includes(`Lv${t.lv}`), 'レベルが無い');
+  truthy(label.includes(t.n), 'タスク名が無い');
+  return label;
+});
+
+await check('目標までの距離が実サンプルから出る', () => {
+  const s = parseScreenshotName(CUSTOMS_RAID[0]);
+  let best = null;
+  for (const t of customsTasks) {
+    for (const p of taskPoints(t, 'customs')) {
+      const b = pinBearing(s, p, quatToYawDeg(s.q));
+      if (!best || b.dist < best.d) best = { d: b.dist, b: b.bearing, n: t.n };
+    }
+  }
+  truthy(best, '地点が 1 つも取れない');
+  truthy(best.d < 2000, `距離が異常: ${best.d}`);
+  return `最寄りの目標は「${best.n}」 ${best.d.toFixed(0)}m 方位 ${best.b.toFixed(0)}°`;
+});
+
+await check('目標の種類に日本語表示がある', () => {
+  const types = new Set();
+  for (const t of customsTasks) for (const o of t.o || []) types.add(o.t);
+  const known = [...types].filter((t) => OBJECTIVE_TYPE[t]);
+  truthy(known.length >= 4, `対応している種類が少ない: ${known.length}/${types.size}`);
+  return `${known.length}/${types.size} 種類に日本語表示（${known.slice(0, 4).map((t) => OBJECTIVE_TYPE[t]).join('・')} …）`;
 });
 
 /* --------------------------------------------------------------------- T15 */
