@@ -604,6 +604,43 @@ def coverage(affine, viewbox, pts_dm):
     return inside / len(pts_dm), fill
 
 
+def check_scene_aliases(merged: dict):
+    """座標系を共有しているのに統合されていないマップ対を見つける。
+
+    SCENE_ALIASES は手書きなので、上流に新しい夜／イベント版が増えたときに
+    追記を忘れると、その 2 マップは互いの POI が距離 0 になり、判定の要である
+    「2 位 / 1 位」の比が 1.0 に張り付いて機能しなくなる。
+    書き忘れをビルドで落とす。
+    """
+    import itertools
+
+    keys = sorted(merged)
+    grids = {}
+    for k in keys:
+        # 1m 格子に落として集合で比べる。総当たりの距離計算は要らない
+        grids[k] = {(round(x), round(z)) for x, _y, z in merged[k]["points"]}
+
+    bad = []
+    for a, b in itertools.combinations(keys, 2):
+        ga, gb = grids[a], grids[b]
+        if not ga or not gb:
+            continue
+        overlap = len(ga & gb)
+        ratio = overlap / min(len(ga), len(gb))
+        if ratio >= 0.90:
+            bad.append((a, b, ratio))
+    if bad:
+        lines = "\n".join(
+            f"    {a} と {b} の POI が {r * 100:.0f}% 一致" for a, b, r in bad
+        )
+        raise SystemExit(
+            "座標系を共有しているのに統合されていないマップがあります。\n"
+            f"{lines}\n"
+            "  tools/build_data.py の SCENE_ALIASES に追記してください。\n"
+            "  統合しないと、その 2 マップは互いに距離 0 になり判定が壊れます。"
+        )
+
+
 def drop_outliers(points, td, margin=0.10):
     """マップの想定範囲から外れた点を落とす。
 
@@ -628,15 +665,21 @@ def drop_outliers(points, td, margin=0.10):
     return kept, len(points) - len(kept)
 
 
+CLAMPED = []
+
+
 def quantize(points):
-    """デシメートル int16 に量子化して重複を落とす。"""
+    """デシメートル int16 に量子化して重複を落とす。
+
+    ±3276.7m を超える点は clamp されるが、そのままだとマップの端に貼り付いた
+    偽の POI になり、最近傍距離を静かに壊す。起きたら記録して警告する。
+    """
     seen = set()
     for x, y, z in points:
-        t = (
-            max(-32768, min(32767, round(x * 10))),
-            max(-32768, min(32767, round(y * 10))),
-            max(-32768, min(32767, round(z * 10))),
-        )
+        raw = (round(x * 10), round(y * 10), round(z * 10))
+        t = tuple(max(-32768, min(32767, v)) for v in raw)
+        if t != raw:
+            CLAMPED.append((x, y, z))
         if t not in seen:
             seen.add(t)
             yield t
@@ -710,6 +753,8 @@ def build():
                 }
                 for e in (scene.get("extracts") or [])
             ]
+
+    check_scene_aliases(merged)
 
     blob = bytearray()
     maps_out = []
@@ -827,7 +872,8 @@ def build():
     db = {
         "anyTaskFile": f"data/tasks/{ANY_MAP}.json" if any_count else None,
         "anyTaskCount": any_count,
-        "version": 1,
+        # スキーマを変えたら上げる。loadMapDb が照合して食い違いを知らせる
+        "version": 2,
         "generated": "build_data.py",
         "builtAt": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
         "svgFiles": svg_files,
@@ -839,6 +885,12 @@ def build():
     (DATA / "mapdb.json").write_text(
         json.dumps(db, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
+
+    if CLAMPED:
+        print(f"  !! 座標が Int16 の範囲を超えて切り詰められました: {len(CLAMPED)} 点",
+              file=sys.stderr)
+        for p in CLAMPED[:3]:
+            print(f"     {p}", file=sys.stderr)
 
     print(f"\n  {len(maps_out)} maps / {db['poiTotal']} points", file=sys.stderr)
     print(f"  data/poi.bin     {len(blob):>8,} bytes", file=sys.stderr)

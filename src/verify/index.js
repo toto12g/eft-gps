@@ -89,6 +89,8 @@ export class MapTracker {
     this.switchRatio = opts.switchRatio ?? 6;
     /** bbox 判定の余裕 (m) */
     this.bboxMargin = opts.bboxMargin ?? 40;
+    /** bbox に収まっている必要があるサンプルの割合 */
+    this.bboxFitRatio = opts.bboxFitRatio ?? 0.95;
 
     /** @type {{at:number, x:number, y:number, z:number, ranking:{key:string,d:number}[]}[]} */
     this.window = [];
@@ -99,6 +101,16 @@ export class MapTracker {
   reset() {
     this.window = [];
     this.lastAt = null;
+  }
+
+  /**
+   * 直前に足した 1 枚を取り消す。
+   * レイド外（ハイドアウト・メニュー）と判定されたサンプルを累積に残すと、
+   * 原点付近の座標が bbox 足切りを狂わせ、正解マップを候補から消してしまう。
+   */
+  undoLast() {
+    this.window.pop();
+    if (this.window.length === 0) this.lastAt = null;
   }
 
   get count() {
@@ -157,17 +169,23 @@ export class MapTracker {
   rank(entries) {
     if (!this.db || entries.length === 0) return [];
 
-    // 軌跡全体を収められないマップは候補から外す。
-    // 短い窓では効かないが、レイドが進むほど強く効く。
+    // 軌跡を収められないマップは候補から外す。
+    // 全部が収まることを求める（every）と、レイド外の 1 枚が混ざっただけで
+    // 正解マップが候補から丸ごと消える。95% でよいことにして、
+    // 外れ値 1 枚に全体を壊されないようにする。
+    const need = Math.ceil(entries.length * this.bboxFitRatio);
     const fits = this.db.maps.filter((m) => {
       const b = m.bbox;
       const g = this.bboxMargin;
-      return entries.every(
-        (e) =>
+      let inside = 0;
+      for (const e of entries) {
+        if (
           e.x >= b.x[0] - g && e.x <= b.x[1] + g &&
           e.z >= b.z[0] - g && e.z <= b.z[1] + g &&
-          e.y >= b.y[0] - g && e.y <= b.y[1] + g,
-      );
+          e.y >= b.y[0] - g && e.y <= b.y[1] + g
+        ) inside++;
+      }
+      return inside >= need;
     });
     // 1 つも残らないなら足切りしない（誤って正解を消さないため）
     const candidates = fits.length ? fits : this.db.maps;

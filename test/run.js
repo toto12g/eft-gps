@@ -29,7 +29,7 @@ import {
   fitAffine,
 } from '../src/geo/index.js';
 import { tarkovTimeHours, checkGameClock, formatGameTime } from '../src/clock/index.js';
-import { loadMapDb, rankMaps, nearestPoiDistance } from '../src/mapdb/index.js';
+import { loadMapDb, rankMaps, nearestPoiDistance, EXPECTED_VERSION } from '../src/mapdb/index.js';
 import { validateSample, VERDICT, MapTracker } from '../src/verify/index.js';
 import { ScreenshotWatcher, isSupported } from '../src/watch/index.js';
 import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '../src/app/pins.js';
@@ -1199,6 +1199,100 @@ await check('目標の種類に日本語表示がある', () => {
   const known = [...types].filter((t) => OBJECTIVE_TYPE[t]);
   truthy(known.length >= 4, `対応している種類が少ない: ${known.length}/${types.size}`);
   return `${known.length}/${types.size} 種類に日本語表示（${known.slice(0, 4).map((t) => OBJECTIVE_TYPE[t]).join('・')} …）`;
+});
+
+/* --------------------------------------------------------------------- T21 */
+
+group('T21 更新時の落とし穴（検収 A / C-1 / C-2）');
+
+await check('mapdb のスキーマ版がコードと一致する', async () => {
+  const raw = await fetch('../data/mapdb.json').then((r) => r.json());
+  eq(raw.version, EXPECTED_VERSION, 'データとコードの版が違う');
+  return `v${raw.version}`;
+});
+
+await check('座標が Int16 の範囲に収まっている', () => {
+  // 超えると clamp されてマップの端に貼り付いた偽の POI になる
+  let worst = 0;
+  let worstMap = '';
+  for (const m of db.maps) {
+    for (let i = 0; i < m.poi.length; i++) {
+      const v = Math.abs(m.poi[i]);
+      if (v > worst) { worst = v; worstMap = m.key; }
+    }
+  }
+  truthy(worst < 32000, `${worstMap} が上限に近い: ${worst / 10} m`);
+  return `最大 ${(worst / 10).toFixed(0)} m（${worstMap}）／上限 3276.7 m`;
+});
+
+await check('座標系を共有するマップが統合されている', () => {
+  // 統合し忘れると互いに距離 0 になり、2位/1位 の比が 1.0 に張り付く
+  const grids = db.maps.map((m) => {
+    const g = new Set();
+    for (let i = 0; i < m.poi.length; i += 3) {
+      g.add(`${Math.round(m.poi[i] / 10)},${Math.round(m.poi[i + 2] / 10)}`);
+    }
+    return { key: m.key, g };
+  });
+  const bad = [];
+  for (let i = 0; i < grids.length; i++) {
+    for (let j = i + 1; j < grids.length; j++) {
+      const a = grids[i], b = grids[j];
+      let overlap = 0;
+      const small = a.g.size < b.g.size ? a.g : b.g;
+      const big = a.g.size < b.g.size ? b.g : a.g;
+      for (const k of small) if (big.has(k)) overlap++;
+      const ratio = overlap / small.size;
+      if (ratio >= 0.9) bad.push(`${a.key}/${b.key} ${(ratio * 100).toFixed(0)}%`);
+    }
+  }
+  eq(bad.length, 0, `統合されていない対: ${bad.join(', ')}`);
+  return `${grids.length} マップ / 重なりの大きい対なし`;
+});
+
+await check('タスク名が日本語に落ちている（翻訳の追随）', () => {
+  // パッチ直後は新タスクだけ英語のまま、という状態になりうる
+  const names = customsTasks.map((t) => t.n || '');
+  const jp = names.filter((n) => /[ぁ-んァ-ヶ一-龠]/.test(n));
+  const descs = customsTasks.flatMap((t) => (t.o || []).map((o) => o.d || ''));
+  const jpDesc = descs.filter((d) => /[ぁ-んァ-ヶ一-龠]/.test(d));
+  // 上流の翻訳は新規タスクに追いつかないことがある（実測 70%: 新しい
+  // WI-FI Camera 系がまるごと英語）。だからここは「大きく落ちたら気づく」
+  // ための緩い番人であって、100% を求めるものではない。
+  const rate = jpDesc.length / descs.length;
+  truthy(rate > 0.55, `目標の説明の日本語率が落ちた: ${(rate * 100).toFixed(0)}%`);
+  return `目標の説明 ${((jpDesc.length / descs.length) * 100).toFixed(0)}% が日本語 / タスク名 ${jp.length}/${names.length}`;
+});
+
+await check('レイド外のサンプルを累積に残さない', () => {
+  // ハイドアウトの座標は原点付近。累積に残ると bbox 足切りが狂い、
+  // 正解のマップが候補から丸ごと消える
+  const t = new MapTracker();
+  WOODS_RAID.slice(0, 6).forEach((f, i) => {
+    t.add(parseScreenshotName(f), db, 1788000000000 + i * 20000);
+  });
+  const before = t.consensus().best;
+  eq(before, 'woods', 'まず woods になっている');
+
+  // ハイドアウトを混ぜてから取り消す
+  t.add(parseScreenshotName(HIDEOUT), db, 1788000000000 + 7 * 20000);
+  const polluted = t.consensus().best;
+  t.undoLast();
+  const after = t.consensus();
+  eq(after.best, 'woods', '取り消し後も woods');
+  eq(after.n, 6, '枚数が戻っている');
+  return `汚染時 ${polluted} → 取り消しで ${after.best}（${after.n} 枚）`;
+});
+
+await check('外れ値 1 枚で候補が消えない（bbox 95%）', () => {
+  // every で足切りしていたころは、原点付近の 1 枚で woods が候補から消えた
+  const t = new MapTracker();
+  WOODS_RAID.forEach((f, i) => t.add(parseScreenshotName(f), db, 1788000000000 + i * 20000));
+  // 直後に 1 枚だけ混ぜる。間隔を空けると別レイド扱いでリセットされてしまう
+  t.add(parseScreenshotName(HIDEOUT), db, 1788000000000 + WOODS_RAID.length * 20000);
+  const c = t.consensus();
+  eq(c.best, 'woods', `外れ値 1 枚で ${c.best} になった`);
+  return `${c.n} 枚中 1 枚が範囲外でも woods を維持`;
 });
 
 /* --------------------------------------------------------------------- T20 */

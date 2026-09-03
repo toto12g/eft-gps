@@ -28,6 +28,9 @@
  * @param {typeof fetch} [fetchImpl]
  * @returns {Promise<{version:number, maps:MapEntry[], byKey:Map<string,MapEntry>}>}
  */
+/** このコードが期待する mapdb.json のスキーマ版。build_data.py と合わせる。 */
+export const EXPECTED_VERSION = 2;
+
 export async function loadMapDb(baseUrl = './data/', fetchImpl = fetch) {
   // cache: 'no-cache' で毎回サーバに確認しに行く（中身が同じなら 304 で軽い）。
   // GitHub Pages は Cache-Control: max-age=600 を返すため、これが無いと
@@ -44,6 +47,16 @@ export async function loadMapDb(baseUrl = './data/', fetchImpl = fetch) {
       return r.arrayBuffer();
     }),
   ]);
+
+  if (meta.version !== EXPECTED_VERSION) {
+    // 版が違うのは、たいてい Service Worker が古いデータを返しているとき。
+    // 「データが古いようです」と曖昧に言うより、何が起きたかを名指しする。
+    throw new Error(
+      `データとコードの版が違います（データ v${meta.version} / コード v${EXPECTED_VERSION}）。` +
+        'Ctrl+Shift+R で再読み込みしてください。直らない場合は、開発者ツールの ' +
+        'Application → Service Workers で Unregister → Clear site data。',
+    );
+  }
 
   const all = new Int16Array(buf);
   if (all.length !== meta.poiTotal * 3) {

@@ -24,6 +24,36 @@ import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * localStorage の値を安全に読む。
+ *
+ * ここはモジュール評価中に走るので、例外を投げると boot().catch() の
+ * エラー表示より前で死に、画面が真っ黒のまま何も出ない。
+ * 壊れていた項目は捨てて既定値に戻し、起動後に 1 行知らせる。
+ */
+const restoreFailures = [];
+function safeParse(key, fallback) {
+  let raw = null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    return fallback; // プライベートウィンドウなどで localStorage 自体が使えない
+  }
+  if (raw === null) return fallback;
+  try {
+    const value = JSON.parse(raw);
+    return value === null || value === undefined ? fallback : value;
+  } catch {
+    restoreFailures.push(key);
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* 消せなくても既定値で続行する */
+    }
+    return fallback;
+  }
+}
+
 const VERDICT_TEXT = {
   [VERDICT.ACCEPT]: ['一致', 'ok'],
   [VERDICT.WRONG_MAP]: ['マップが違う', 'warn'],
@@ -44,7 +74,7 @@ const state = {
   view: null,
   watcher: null,
   tracker: new MapTracker(),
-  factions: new Set(JSON.parse(localStorage.getItem('eft-gps.factions') || '["pmc","scav","shared"]')),
+  factions: new Set(safeParse('eft-gps.factions', ['pmc', 'scav', 'shared'])),
   selectedKey: localStorage.getItem('eft-gps.map') || 'customs',
   // 既定 ON。発火条件は d1 < 5m かつ 2位/1位 > 5 で、実測マージンは 30 倍ある。
   // 手動選択を置き換えるのではなく、明らかに間違っているときだけ直す。
@@ -53,7 +83,7 @@ const state = {
   lastModified: null,
   pins: [],
   landmarks: {},
-  layers: new Set(JSON.parse(localStorage.getItem('eft-gps.layers') || 'null') || DEFAULT_ENABLED),
+  layers: new Set(safeParse('eft-gps.layers', DEFAULT_ENABLED)),
   tasks: [],
   taskFilter: '',
   activeTask: null,
@@ -138,6 +168,12 @@ async function boot() {
   if (preset) {
     $('input-text').value = preset;
     handleInput(preset);
+  }
+  if (restoreFailures.length) {
+    setStatus(
+      `保存された設定を復元できなかったので初期値に戻しました（${restoreFailures.join(', ')}）`,
+      'low',
+    );
   }
   document.title = `EFT 測位クライアント — ${state.selectedKey}`;
 }
@@ -653,9 +689,14 @@ async function applySample(sample, fileModifiedMs, live) {
     });
   }
 
-  if (live && verdict.verdict === VERDICT.NOT_IN_RAID) {
-    state.skipped++;
-    $('watch-count').textContent = `${state.received} 枚受信 / ${state.skipped} 枚除外`;
+  if (verdict.verdict === VERDICT.NOT_IN_RAID) {
+    // レイド外の 1 枚を累積に残すと、原点付近の座標が bbox 足切りを狂わせ、
+    // 正解のマップが候補から消える。判定が出た時点で取り消す。
+    state.tracker.undoLast();
+    if (live) {
+      state.skipped++;
+      $('watch-count').textContent = `${state.received} 枚受信 / ${state.skipped} 枚除外`;
+    }
   }
 
   renderSample(sample, verdict);
