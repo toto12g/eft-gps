@@ -81,6 +81,7 @@ const state = {
   autoSwitch: (localStorage.getItem('eft-gps.autoSwitch') ?? '1') === '1',
   lastSample: null,
   lastModified: null,
+  lastVerdict: null,
   pins: [],
   landmarks: {},
   layers: new Set(safeParse('eft-gps.layers', DEFAULT_ENABLED)),
@@ -124,6 +125,7 @@ async function boot() {
     state.tracker.reset();
     state.lastSample = null;
     state.lastModified = null;
+    state.lastVerdict = null;
     renderSample(null, null);
   });
   $('floor-select').addEventListener('change', (ev) => {
@@ -146,6 +148,8 @@ async function boot() {
       );
       localStorage.setItem('eft-gps.factions', JSON.stringify([...state.factions]));
       state.view.setFactions(state.factions);
+      // 最寄り脱出口の案内も同じ集合で出し直す
+      if (state.lastSample) renderSample(state.lastSample, state.lastVerdict);
     });
   }
   state.view.factions = new Set(state.factions);
@@ -606,6 +610,7 @@ function setupWatcher() {
     state.view.clearTrail();
     state.tracker.reset();
     for (const it of items) handleScreenshot(it.name, it.lastModified);
+    await applyQueue; // 全部描き終わってからボタンを戻す
   });
 
   if (!isSupported()) {
@@ -628,14 +633,30 @@ function renderWatchStatus(status, detail) {
   $('btn-replay').hidden = status !== WATCH.WATCHING;
 }
 
+/**
+ * applySample は中で await selectMap()（SVG 取得・レイヤ全消し・タスク再読込）を
+ * 行うので、同時に走らせるとレイヤ掃除と描画が交錯してマーカーが消える。
+ * 「直近 20 枚を読み込む」は 20 本を一度に投げるため、そこで確実に壊れる。
+ * 1 本のプロミス連鎖に載せて順番を保つ。
+ */
+let applyQueue = Promise.resolve();
+function enqueueSample(sample, lastModified, live) {
+  applyQueue = applyQueue
+    .then(() => applySample(sample, lastModified, live))
+    .catch((err) => console.warn('[apply]', err));
+  return applyQueue;
+}
+
 /** 新しいスクリーンショットが 1 枚できたとき。 */
 function handleScreenshot(filename, lastModified) {
   const sample = parseScreenshotName(filename);
   if (!sample) return; // 座標の入っていないファイル
-  $('input-text').value = filename;
+  const box = $('input-text');
+  // 監視中に手入力している最中なら、書きかけを消さない
+  if (!box.value.trim() || document.activeElement !== box) box.value = filename;
   state.lastSample = sample;
   state.lastModified = lastModified;
-  applySample(sample, lastModified, true);
+  enqueueSample(sample, lastModified, true);
 }
 
 /* ------------------------------------------------------------------ 入力 */
@@ -663,7 +684,7 @@ function handleInput(raw) {
   }
   state.lastSample = sample;
   state.lastModified = null;
-  applySample(sample, null, false);
+  enqueueSample(sample, null, false);
 }
 
 async function applySample(sample, fileModifiedMs, live) {
@@ -699,6 +720,7 @@ async function applySample(sample, fileModifiedMs, live) {
     }
   }
 
+  state.lastVerdict = verdict;
   renderSample(sample, verdict);
 
   const m = state.db.byKey.get(state.selectedKey);
@@ -841,7 +863,7 @@ function renderSample(sample, verdict) {
     sw.textContent = `${verdict.suggest} に切り替える`;
     sw.onclick = () => {
       selectMap(verdict.suggest).then(() => {
-        if (state.lastSample) applySample(state.lastSample, state.lastModified, false);
+        if (state.lastSample) enqueueSample(state.lastSample, state.lastModified, false);
       });
     };
   }
@@ -852,7 +874,9 @@ function nearestExit(map, sample, yaw) {
   let best = null;
   for (const e of map.extracts) {
     if (!e.position) continue;
-    if (e.faction === 'scav') continue; // PMC / 共用のみ
+    // 地図の描画と同じ集合で絞る。ここだけ scav を決め打ちで捨てていたため、
+    // スカブランでは案内される脱出口が丸ごと嘘になっていた
+    if (!state.factions.has(e.faction || 'shared')) continue;
     const dx = e.position.x - sample.x;
     const dz = e.position.z - sample.z;
     const dist = Math.hypot(dx, dz);

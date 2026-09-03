@@ -176,10 +176,18 @@ SVG の `preserveAspectRatio="xMidYMid meet"`）をそのまま再現して解�
 | streets-of-tarkov | 99.7% | 0.06% | 0 | ✓ |
 | terminal | 100.0% | 0.06% | 0 | ✓ |
 | woods | 99.0% | 0.04% | 0 | ✓ |
-| icebreaker / the-lab / the-labyrinth | — | — | — | SVG なし。手動校正が必要 |
+| the-lab | 100.0% | 0.00% | 4 | ✓ 自動位置合わせ |
+| icebreaker / the-labyrinth | — | — | — | 上流に SVG 素材が無い |
 
-`Labs.svg` は SVG リポジトリに存在するが、tarkov-dev の `bounds` と縦横比が 10% 合わない
-ため自動では採用していない。校正ツールで対応点を打てば使える。
+`Labs.svg` は tarkov-dev の `bounds` と縦横比が 10% 合わないため、解析的な初期値は使えない。
+対応点を打てるテキストラベルも SVG に無いので、**POI 点群を図の描画領域に重ね合わせて
+自動位置合わせ**した（`tools/autofit.html`）。図をラスタライズしてインクの二値マスクを作り、
+回転・反転・拡大・平行移動を探索して、POI がインクに乗る割合を最大化する。
+
+結果は回転 270°（tarkov-dev の `coordinateRotation` と一致）、重なり 99.7%。
+脱出口 7 箇所と POI 980 点がすべて枠内に入り、Parking Gate と Hangar Gate の
+範囲ポリゴンが図の駐車場・ハンガーに重なることを目視で確認した。
+
 the-labyrinth と icebreaker は SVG 素材そのものが存在しない。
 
 ### 校正ツール（calibrate.html）

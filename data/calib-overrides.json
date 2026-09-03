@@ -1,1 +1,26 @@
-{}
+{
+  "the-lab": {
+    "svg": "maps/Labs.svg",
+    "svgViewBox": [
+      0,
+      0,
+      720,
+      586
+    ],
+    "affine": {
+      "a": 0,
+      "b": 1.89821642,
+      "c": 979.31352795,
+      "d": 1.89821642,
+      "e": 0,
+      "f": 631.05849057
+    },
+    "rms": null,
+    "fit": {
+      "method": "autofit",
+      "layer": "First_Level",
+      "overlap": 0.9969
+    },
+    "points": []
+  }
+}

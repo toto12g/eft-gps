@@ -1,0 +1,184 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>autofit</title>
+<style>
+  body { background:#0e1112; color:#dce1df; font:12px/1.6 monospace; margin:0; padding:12px; }
+  pre { white-space:pre-wrap; }
+  #stage { display:flex; gap:10px; margin-top:10px; }
+  canvas { background:#14181a; border:1px solid #2a3133; image-rendering:pixelated; }
+</style>
+<pre id="out">…</pre>
+<div id="stage"><canvas id="mask"></canvas><canvas id="over"></canvas></div>
+
+<script type="module">
+/**
+ * 地図画像に対応点を打てないマップを、POI 点群の重なりで自動位置合わせする。
+ *
+ * 手順: 図の「インクのある画素」を二値マスクにし、ワールド座標を
+ * 回転・反転・拡大・平行移動して当てはめ、POI がインクに乗る割合を最大化する。
+ * 部屋の中にロードや湧きが置かれている屋内マップでは、これがよく効く。
+ */
+const params = new URLSearchParams(location.search);
+const MAP = params.get('map') || 'the-lab';
+const SVG = params.get('svg') || 'Labs.svg';
+const LAYER = params.get('layer') || 'First_Level';
+const log = [];
+const say = (s) => { log.push(s); document.getElementById('out').textContent = log.join('\n'); };
+
+const db = await fetch('../data/mapdb.json', { cache: 'no-cache' }).then((r) => r.json());
+const meta = db.maps.find((m) => m.key === MAP);
+const buf = await fetch('../data/poi.bin', { cache: 'no-cache' }).then((r) => r.arrayBuffer());
+const all = new Int16Array(buf);
+const poi = [];
+for (let i = 0; i < meta.poiCount; i++) {
+  const o = (meta.poiOffset + i) * 3;
+  poi.push([all[o] / 10, all[o + 2] / 10]);   // x, z
+}
+say(`${MAP}: POI ${poi.length} 点 / ${SVG} の ${LAYER} 層に合わせる`);
+
+// ---- 図をラスタライズして、インクのある画素の二値マスクを作る ----
+const svgText = await fetch('../maps/' + SVG, { cache: 'no-cache' }).then((r) => r.text());
+const holder = document.createElement('div');
+holder.innerHTML = svgText;
+const svg = holder.querySelector('svg');
+const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+for (const g of [...svg.children]) {
+  if (g.nodeName === 'g' && g.id && g.id !== LAYER) g.remove();
+}
+const W = 480;
+const H = Math.round((W * vb[3]) / vb[2]);
+svg.setAttribute('width', W);
+svg.setAttribute('height', H);
+
+const img = new Image();
+const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+img.src = URL.createObjectURL(blob);
+await img.decode();
+
+const mc = document.getElementById('mask');
+mc.width = W; mc.height = H;
+const mctx = mc.getContext('2d', { willReadFrequently: true });
+mctx.drawImage(img, 0, 0, W, H);
+const px = mctx.getImageData(0, 0, W, H).data;
+const ink = new Uint8Array(W * H);
+let inkCount = 0;
+let ix0 = W, iy0 = H, ix1 = 0, iy1 = 0;
+for (let i = 0; i < W * H; i++) {
+  if (px[i * 4 + 3] > 40) {
+    ink[i] = 1; inkCount++;
+    const x = i % W, y = (i / W) | 0;
+    if (x < ix0) ix0 = x; if (x > ix1) ix1 = x;
+    if (y < iy0) iy0 = y; if (y > iy1) iy1 = y;
+  }
+}
+say(`インク画素 ${inkCount} / ${W}×${H}  範囲 x ${ix0}..${ix1}  y ${iy0}..${iy1}`);
+
+// ---- 当てはめ ----
+const rot = (p, deg) => {
+  const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  return [p[0] * c - p[1] * s, p[0] * s + p[1] * c];
+};
+function score(pts) {
+  let hit = 0;
+  for (const [x, y] of pts) {
+    const cx = Math.round(x), cy = Math.round(y);
+    if (cx < 0 || cy < 0 || cx >= W || cy >= H) continue;
+    if (ink[cy * W + cx]) hit++;
+  }
+  return hit / pts.length;
+}
+
+let best = null;
+for (const deg of [0, 90, 180, 270]) {
+  for (const my of [1, -1]) {
+    const rotated = poi.map((p) => { const q = rot(p, deg); return [q[0], q[1] * my]; });
+    const xs = rotated.map((p) => p[0]), ys = rotated.map((p) => p[1]);
+    const bx0 = Math.min(...xs), bx1 = Math.max(...xs);
+    const by0 = Math.min(...ys), by1 = Math.max(...ys);
+
+    // 点群の矩形をインクの矩形へ合わせたものを出発点に、拡大と平行移動を探索
+    const s0 = Math.min((ix1 - ix0) / (bx1 - bx0), (iy1 - iy0) / (by1 - by0));
+    for (let ks = 0.80; ks <= 1.25; ks += 0.01) {
+      const s = s0 * ks;
+      const cx0 = ix0 + (ix1 - ix0) / 2 - ((bx0 + bx1) / 2) * s;
+      const cy0 = iy0 + (iy1 - iy0) / 2 - ((by0 + by1) / 2) * s;
+      for (let dx = -40; dx <= 40; dx += 4) {
+        for (let dy = -40; dy <= 40; dy += 4) {
+          const pts = rotated.map((p) => [p[0] * s + cx0 + dx, p[1] * s + cy0 + dy]);
+          const v = score(pts);
+          if (!best || v > best.v) best = { v, deg, my, s, tx: cx0 + dx, ty: cy0 + dy };
+        }
+      }
+    }
+  }
+}
+say(`粗探索: 一致率 ${(best.v * 100).toFixed(1)}%  回転 ${best.deg}°  反転 ${best.my < 0 ? 'あり' : 'なし'}`);
+
+// 細かく詰める
+for (let round = 0; round < 3; round++) {
+  const step = [2, 0.6, 0.2][round];
+  const ss = [0.02, 0.006, 0.002][round];
+  let improved = best;
+  for (let ds = -3; ds <= 3; ds++) {
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dy = -4; dy <= 4; dy++) {
+        const s = best.s * (1 + ds * ss);
+        const tx = best.tx + dx * step, ty = best.ty + dy * step;
+        const pts = poi.map((p) => {
+          const q = rot(p, best.deg);
+          return [q[0] * s + tx, q[1] * best.my * s + ty];
+        });
+        const v = score(pts);
+        if (v > improved.v) improved = { ...best, v, s, tx, ty };
+      }
+    }
+  }
+  best = improved;
+}
+say(`詰め後  : 一致率 ${(best.v * 100).toFixed(1)}%  1m = ${(best.s * vb[2] / W).toFixed(3)} SVG 単位`);
+
+// ---- 画像座標 → SVG ユーザ座標のアフィンにして出力 ----
+const k = vb[2] / W;                       // ラスタ画素 → SVG ユーザ単位
+const r = (best.deg * Math.PI) / 180, c = Math.cos(r), sn = Math.sin(r);
+const affine = {
+  a: best.s * c * k,
+  b: -best.s * sn * k,
+  c: best.tx * k + vb[0],
+  d: best.my * best.s * sn * k,
+  e: best.my * best.s * c * k,
+  f: best.ty * k + vb[1],
+};
+const round8 = (v) => Number(v.toFixed(8));
+const payload = {
+  [MAP]: {
+    svg: 'maps/' + SVG,
+    svgViewBox: vb,
+    affine: Object.fromEntries(Object.entries(affine).map(([kk, vv]) => [kk, round8(vv)])),
+    rms: null,
+    fit: { method: 'autofit', layer: LAYER, overlap: Number((best.v).toFixed(4)) },
+    points: [],
+  },
+};
+say('');
+say(JSON.stringify(payload, null, 2));
+
+// ---- 重ねて描いて目視できるようにする ----
+const oc = document.getElementById('over');
+oc.width = W; oc.height = H;
+const octx = oc.getContext('2d');
+octx.drawImage(img, 0, 0, W, H);
+octx.fillStyle = '#22e0ff';
+for (const p of poi) {
+  const q = rot(p, best.deg);
+  const x = q[0] * best.s + best.tx, y = q[1] * best.my * best.s + best.ty;
+  octx.fillRect(x - 1, y - 1, 2, 2);
+}
+octx.fillStyle = '#ff5fa2';
+for (const e of meta.extracts || []) {
+  if (!e.position) continue;
+  const q = rot([e.position.x, e.position.z], best.deg);
+  const x = q[0] * best.s + best.tx, y = q[1] * best.my * best.s + best.ty;
+  octx.beginPath(); octx.arc(x, y, 4, 0, 7); octx.fill();
+}
+document.title = 'AUTOFIT ' + (best.v * 100).toFixed(1);
+</script>

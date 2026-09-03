@@ -621,6 +621,35 @@ await check('mapdb.json の項目が loadMapDb を素通りしている', async 
   return `${Object.keys(raw).length - 2} 項目すべてが利用側に届いている`;
 });
 
+await check('The Lab が校正済みで、脱出口が図に収まる', () => {
+  const m = db.byKey.get('the-lab');
+  truthy(m.affine, 'the-lab に校正が入っていない');
+  eq(m.calib.source, 'manual', '手動校正として記録されていない');
+  const [vx, vy, vw, vh] = m.svgViewBox;
+  let inside = 0;
+  for (const e of m.extracts || []) {
+    const p2 = applyAffine(m.affine, e.position.x, e.position.z);
+    if (p2.px >= vx && p2.px <= vx + vw && p2.py >= vy && p2.py <= vy + vh) inside++;
+  }
+  eq(inside, (m.extracts || []).length, '枠外の脱出口がある');
+  let poiIn = 0;
+  for (let i = 0; i < m.poiCount; i++) {
+    const o = i * 3;
+    const p2 = applyAffine(m.affine, m.poi[o] / 10, m.poi[o + 2] / 10);
+    if (p2.px >= vx && p2.px <= vx + vw && p2.py >= vy && p2.py <= vy + vh) poiIn++;
+  }
+  const pct = (poiIn / m.poiCount) * 100;
+  truthy(pct > 99, `POI が枠内に収まらない: ${pct.toFixed(1)}%`);
+  return `脱出口 ${inside}/${(m.extracts || []).length} / POI ${pct.toFixed(1)}% が枠内`;
+});
+
+await check('地図画像のあるマップが 11 になった', () => {
+  const withMap = db.maps.filter((m) => m.svg && m.affine);
+  eq(withMap.length, 11, `地図つきマップ: ${withMap.map((m) => m.key).join(', ')}`);
+  const without = db.maps.filter((m) => !m.svg).map((m) => m.key);
+  return `${withMap.length} マップに地図あり / 残り ${without.join(', ')}（上流に SVG 素材が無い）`;
+});
+
 await check('mapdb が svgFiles を返している（校正ツールの素材一覧）', () => {
   truthy(Array.isArray(db.svgFiles), 'svgFiles が配列でない');
   truthy(db.svgFiles.length >= 10, `素材が少ない: ${db.svgFiles.length}`);
