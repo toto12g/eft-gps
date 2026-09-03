@@ -69,6 +69,12 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .safety b { color: var(--ink-2); font-weight: 600; }
 .safety code { font: 10px/1.5 var(--mono); color: var(--ink-2); word-break: break-all; }
 .muted-line { font: 11px/1.8 var(--mono); color: var(--muted); min-height: 18px; }
+/* 現在地の古さ。撮り忘れたまま動いているのが最も危ない誤りなので、常に出す */
+.age { font: 600 12px/1.6 var(--mono); margin-top: 6px; min-height: 19px; }
+.age:empty { display: none; }
+.age.fresh { color: var(--ok); }
+.age.aging { color: var(--accent); }
+.age.stale { color: var(--warn); }
 label.check { display: flex; gap: 7px; align-items: flex-start; margin-top: 8px;
               font: 400 11px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
               color: var(--ink-2); cursor: pointer; }
@@ -414,6 +420,10 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
     <div class="field">
       <label for="floor-select">フロア</label>
       <select id="floor-select" disabled></select>
+      <label class="check" id="floor-lock" hidden>
+        <input type="checkbox" id="floor-lock-input">
+        <span>フロアを固定する（自動で切り替えない）</span>
+      </label>
     </div>
     <div class="field">
       <label>脱出口の表示</label>
@@ -432,7 +442,10 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
     <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
   </div>
 
-  <div><div id="status" class="status idle">待機中</div></div>
+  <div>
+    <div id="status" class="status idle">待機中</div>
+    <div id="sample-age" class="age"></div>
+  </div>
 
   <div id="sample"><div class="hint">ファイル名を貼り付けるか、座標を入力してください。</div></div>
 

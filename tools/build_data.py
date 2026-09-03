@@ -845,6 +845,10 @@ def build():
             "rms": (ov or {}).get("rms"),
             "calib": calib,
             "svg": ("maps/" + svg_name) if (svg_name and affine) else None,
+            # 基準にする SVG のレイヤ。override が優先。指定が無ければ
+            # tarkov-dev の svgLayer。どちらも無ければ全レイヤ表示になる
+            "svgBaseLayer": ((ov or {}).get("svgLayer")
+                             or ((td or {}).get("svgLayer") if td else None)),
             "svgViewBox": viewbox if affine else None,
             "tarkovDev": None if not td else {
                 "transform": td.get("transform"),

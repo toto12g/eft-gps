@@ -125,7 +125,7 @@ export class MapView {
   /** SVG のレイヤ (フロア) を出し分ける。null で既定レイヤ。 */
   setFloor(svgLayerId) {
     if (!this.svgElement) return [];
-    const base = (this.mapData.tarkovDev && this.mapData.tarkovDev.svgLayer) || null;
+    const base = this.mapData.svgBaseLayer || null;
     const want = svgLayerId || base;
     const groups = [...this.svgElement.children].filter((c) => c.nodeName === 'g' && c.id);
     for (const g of groups) {
@@ -408,6 +408,23 @@ export class MapView {
       [worldToLatLng(aff, from.x, from.z), worldToLatLng(aff, to.x, to.z)],
       { color: '#ffc848', weight: 2, opacity: 0.75, dashArray: '6 6', interactive: false },
     ).addTo(this.map);
+  }
+
+  /**
+   * 現在地マーカーの「古さ」を反映する。30 秒で 0.7、2 分で 0.45、5 分で 0.25。
+   * 撮り忘れたまま動いているときに、古い点だと気づけるようにするため。
+   */
+  setPlayerAge(seconds) {
+    if (!this.playerLayer) return;
+    const el = this.playerLayer.getElement();
+    if (!el) return;
+    let op = 1;
+    if (seconds !== null && seconds !== undefined) {
+      if (seconds > 300) op = 0.25;
+      else if (seconds > 120) op = 0.45;
+      else if (seconds > 30) op = 0.7;
+    }
+    el.style.opacity = String(op);
   }
 
   /** SVG 上の座標を返す (デバッグ・診断用)。 */

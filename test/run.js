@@ -1230,6 +1230,89 @@ await check('目標の種類に日本語表示がある', () => {
   return `${known.length}/${types.size} 種類に日本語表示（${known.slice(0, 4).map((t) => OBJECTIVE_TYPE[t]).join('・')} …）`;
 });
 
+/* --------------------------------------------------------------------- T22 */
+
+group('T22 フロア自動切替（検収 B-2）');
+
+await check('階層データが揃っている', () => {
+  const withLayers = db.maps.filter((m) => ((m.tarkovDev || {}).layers || []).length);
+  truthy(withLayers.length >= 5, `階層を持つマップが少ない: ${withLayers.length}`);
+  let named = 0;
+  let extents = 0;
+  for (const m of withLayers) {
+    for (const L of m.tarkovDev.layers) {
+      if (L.name) named++;
+      extents += (L.extents || []).length;
+    }
+  }
+  return `${withLayers.length} マップ / ${named} レイヤに表示名 / ${extents} 個の適用範囲`;
+});
+
+await check('基準レイヤが決まっている', () => {
+  const withSvg = db.maps.filter((m) => m.svg);
+  const missing = withSvg.filter((m) => !m.svgBaseLayer).map((m) => m.key);
+  eq(missing.length, 0, `基準レイヤが無い: ${missing.join(', ')}`);
+  const lab = db.byKey.get('the-lab');
+  eq(lab.svgBaseLayer, 'First_Level', 'The Lab の基準レイヤ（自動位置合わせと同じ層）');
+  return `${withSvg.length} マップすべてに基準レイヤ`;
+});
+
+await check('高さと平面位置からフロアを選べる', () => {
+  // Customs の寮は 2 階 [2.7, 6.5] / 3 階 [5.7, 1000] が矩形 "dorms" に重なる
+  const m = db.byKey.get('customs');
+  const layers = m.tarkovDev.layers;
+  const inside = (rect, x, z) => {
+    const [[x1, z1], [x2, z2]] = rect;
+    return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) &&
+           z >= Math.min(z1, z2) && z <= Math.max(z1, z2);
+  };
+  const pick = (x, y, z) => {
+    let best = null;
+    for (const L of layers) {
+      for (const ex of L.extents || []) {
+        const [lo, hi] = ex.height || [-Infinity, Infinity];
+        if (!(y >= lo && y < hi)) continue;
+        const rects = ex.bounds || [];
+        if (rects.length && !rects.some((r) => inside(r, x, z))) continue;
+        if (!best || lo > best.lo || (lo === best.lo && hi - lo < best.span)) {
+          best = { name: L.name, lo, span: hi - lo };
+        }
+      }
+    }
+    return best ? best.name : null;
+  };
+  // 寮の矩形は [[243,190],[165,125]]。その中心あたりで高さだけ変える
+  const cx = (243 + 165) / 2, cz = (190 + 125) / 2;
+  eq(pick(cx, 4.0, cz), '2nd Floor', '高さ 4.0 は 2 階');
+  eq(pick(cx, 8.0, cz), '3rd Floor', '高さ 8.0 は 3 階');
+  // 2 階 [2.7,6.5] と 3 階 [5.7,∞] は重なる。下限の高い方を採る
+  eq(pick(cx, 6.3, cz), '3rd Floor', '重なる区間では上の階');
+  eq(pick(cx, 0.0, cz), null, '地上はどのレイヤにも当たらない（基準レイヤになる）');
+  // 矩形の外なら、同じ高さでも 2 階にはならない
+  eq(pick(-300, 4.0, -300), null, '矩形の外');
+  return '寮の同じ場所で 高さ4.0→2階 / 6.3→3階（重なり）/ 8.0→3階 / 0.0→地上';
+});
+
+await check('レイヤ名が SVG のグループに対応づく', () => {
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const resolve = (layer, ids) => {
+    if (layer.svgLayer && ids.includes(layer.svgLayer)) return layer.svgLayer;
+    const name = layer.name || '';
+    for (const c of [name, name.replace(/\s+/g, '_'), name.replace(/\s+/g, '_') + '_Level']) {
+      if (ids.includes(c)) return c;
+    }
+    const n = norm(name);
+    return n ? ids.find((g) => norm(g).startsWith(n)) || null : null;
+  };
+  // The Lab は maps.json に svgLayer が無いので、名前から解決する必要がある
+  const ids = ['Technical_Level', 'First_Level', 'Second_Level'];
+  eq(resolve({ name: 'Second Level', svgLayer: null }, ids), 'Second_Level', 'Second Level');
+  eq(resolve({ name: 'Technical', svgLayer: null }, ids), 'Technical_Level', 'Technical');
+  // 明示があればそちらが優先
+  eq(resolve({ name: '2nd Floor', svgLayer: 'Second_Floor' }, ['Second_Floor']), 'Second_Floor', '明示');
+  return 'svgLayer が無くても名前から解決できる';
+});
+
 /* --------------------------------------------------------------------- T21 */
 
 group('T21 更新時の落とし穴（検収 A / C-1 / C-2）');

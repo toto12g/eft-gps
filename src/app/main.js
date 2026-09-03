@@ -82,6 +82,9 @@ const state = {
   lastSample: null,
   lastModified: null,
   lastVerdict: null,
+  shownAt: null,
+  floorLocked: safeParse('eft-gps.floorLocked', false),
+  floorIds: [],
   pins: [],
   landmarks: {},
   layers: new Set(safeParse('eft-gps.layers', DEFAULT_ENABLED)),
@@ -126,10 +129,19 @@ async function boot() {
     state.lastSample = null;
     state.lastModified = null;
     state.lastVerdict = null;
+    state.shownAt = null;
+    updateAge();
     renderSample(null, null);
   });
   $('floor-select').addEventListener('change', (ev) => {
     state.view.setFloor(ev.target.value || null);
+  });
+  const lock = $('floor-lock-input');
+  lock.checked = state.floorLocked;
+  lock.addEventListener('change', () => {
+    state.floorLocked = lock.checked;
+    localStorage.setItem('eft-gps.floorLocked', JSON.stringify(lock.checked));
+    if (!lock.checked && state.lastSample) syncFloor(state.lastSample);
   });
 
   const auto = $('auto-switch');
@@ -162,7 +174,10 @@ async function boot() {
 
   await selectMap(state.selectedKey);
   tickClock();
-  setInterval(tickClock, 1000);
+  setInterval(() => {
+    tickClock();
+    updateAge();
+  }, 1000);
 
   // ?task=<id> でタスクを指定できる。特定の目標地点を人に見せるときに使える。
   const wantTask = params.get('task');
@@ -180,6 +195,69 @@ async function boot() {
     );
   }
   document.title = `EFT 測位クライアント — ${state.selectedKey}`;
+}
+
+/* ------------------------------------------------------------ フロア */
+
+/** 矩形 [[x1,z1],[x2,z2], ラベル?] の中か。 */
+function insideRect(rect, x, z) {
+  const [[x1, z1], [x2, z2]] = rect;
+  return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) &&
+         z >= Math.min(z1, z2) && z <= Math.max(z1, z2);
+}
+
+/**
+ * 高さと平面位置から、いるべきフロアを選ぶ。
+ *
+ * 地下や寮 3 階にいるとき、別の階の図の上にマーカーが乗ると、
+ * いちばん位置を知りたい状況でいちばん読めない図になる。
+ *
+ * 高さの範囲は重なっている（Customs の寮なら 2 階 [2.7, 6.5]、
+ * 3 階 [5.7, ∞]）。重なった区間では「下限がより高い方」を採る。
+ * 3 階の定義が 5.7 から始まっている以上、6.3 にいるなら 3 階と読むのが自然。
+ */
+function pickFloor(map, sample) {
+  const layers = (map.tarkovDev && map.tarkovDev.layers) || [];
+  let best = null;
+  for (const L of layers) {
+    for (const ex of L.extents || []) {
+      const [lo, hi] = ex.height || [-Infinity, Infinity];
+      if (!(sample.y >= lo && sample.y < hi)) continue;
+      const rects = ex.bounds || [];
+      if (rects.length && !rects.some((r) => insideRect(r, sample.x, sample.z))) continue;
+      // 下限が高いものを優先。同じなら範囲の狭い（より具体的な）方
+      if (!best || lo > best.lo || (lo === best.lo && hi - lo < best.span)) {
+        best = { layer: L, lo, span: hi - lo };
+      }
+    }
+  }
+  return best ? best.layer : null;
+}
+
+/** tarkov-dev のレイヤ名を、SVG のグループ id に対応づける。 */
+function resolveSvgLayer(layer, groupIds) {
+  if (layer.svgLayer && groupIds.includes(layer.svgLayer)) return layer.svgLayer;
+  const name = layer.name || '';
+  const cands = [name, name.replace(/\s+/g, '_'), name.replace(/\s+/g, '_') + '_Level'];
+  for (const c of cands) if (groupIds.includes(c)) return c;
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const n = norm(name);
+  return n ? groupIds.find((g) => norm(g).startsWith(n)) || null : null;
+}
+
+/** サンプルに合わせてフロアを切り替える。固定中は何もしない。 */
+function syncFloor(sample) {
+  if (state.floorLocked || !sample) return;
+  const m = state.db.byKey.get(state.selectedKey);
+  if (!m || !m.affine) return;
+  const layer = pickFloor(m, sample);
+  const want = layer ? resolveSvgLayer(layer, state.floorIds) : (m.svgBaseLayer || '');
+  const sel = $('floor-select');
+  const value = want && state.floorIds.includes(want) ? want : (m.svgBaseLayer || '');
+  if (sel.value !== value) {
+    sel.value = value;
+    state.view.setFloor(value || null);
+  }
 }
 
 /* ------------------------------------------------ 名前の付いた地点のレイヤ */
@@ -725,7 +803,10 @@ async function applySample(sample, fileModifiedMs, live) {
 
   const m = state.db.byKey.get(state.selectedKey);
   if (m && m.affine && isDrawable(verdict.verdict)) {
+    syncFloor(sample);
+    state.shownAt = fileModifiedMs ?? sample.takenAtMs ?? Date.now();
     state.view.setPlayer(sample, headingOf(sample), verdict.verdict === VERDICT.ACCEPT);
+    updateAge();
   }
   renderPins(); // 現在地が動いたので距離と方位を出し直す
   renderObjectives();
@@ -760,18 +841,29 @@ async function selectMap(key) {
   const floors = $('floor-select');
   floors.innerHTML = '';
   if (ok) {
-    const base = (m.tarkovDev && m.tarkovDev.svgLayer) || '';
+    const base = m.svgBaseLayer || '';
     const ids = state.view.setFloor(null);
+    state.floorIds = ids;
+    // 表示名は tarkov-dev の layers[].name を使う。
+    // SVG のグループ id をそのまま出すと "Second Floor" が "Second_Floor" になる
+    const named = new Map();
+    for (const L of (m.tarkovDev && m.tarkovDev.layers) || []) {
+      const id = resolveSvgLayer(L, ids);
+      if (id && L.name) named.set(id, L.name);
+    }
     for (const id of ids) {
       const opt = document.createElement('option');
       opt.value = id;
-      opt.textContent = id.replace(/_/g, ' ');
+      opt.textContent = named.get(id) || (id === base ? '地上' : id.replace(/_/g, ' '));
       if (id === base) opt.selected = true;
       floors.appendChild(opt);
     }
     floors.disabled = ids.length < 2;
+    $('floor-lock').hidden = ids.length < 2;
   } else {
     floors.disabled = true;
+    state.floorIds = [];
+    $('floor-lock').hidden = true;
   }
 
   state.pins = loadPins(key);
@@ -904,6 +996,28 @@ function setStatus(text, cls) {
   const el = $('status');
   el.textContent = text;
   el.className = 'status ' + cls;
+}
+
+/**
+ * 現在地が「いつのものか」を出し、古くなるほどマーカーを薄くする。
+ *
+ * 撮り忘れたまま移動しているときに、古い点を現在地だと信じて動くのが
+ * このツールで最も危ない誤り。時間を出さないと見分けがつかない。
+ */
+function updateAge() {
+  const el = $('sample-age');
+  if (!state.shownAt) {
+    el.textContent = '';
+    state.view.setPlayerAge(null);
+    return;
+  }
+  const sec = Math.max(0, (Date.now() - state.shownAt) / 1000);
+  el.textContent =
+    sec < 60 ? `${Math.round(sec)} 秒前`
+      : sec < 3600 ? `${Math.floor(sec / 60)} 分 ${Math.round(sec % 60)} 秒前`
+        : `${Math.floor(sec / 3600)} 時間前`;
+  el.className = 'age ' + (sec < 30 ? 'fresh' : sec < 120 ? 'aging' : 'stale');
+  state.view.setPlayerAge(sec);
 }
 
 function tickClock() {

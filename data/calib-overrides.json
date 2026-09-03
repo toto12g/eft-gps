@@ -21,6 +21,8 @@
       "layer": "First_Level",
       "overlap": 0.9969
     },
-    "points": []
+    "points": [],
+    "svgLayer": "First_Level",
+    "note": "自動位置合わせは First_Level に対して行ったので、基準レイヤもここに固定する"
   }
 }
