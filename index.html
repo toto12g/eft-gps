@@ -196,6 +196,36 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
   text-overflow: ellipsis; font: 600 11px/1.4 var(--mono); color: #cdb4ff;
   text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
 }
+/* 持ち物 */
+#task-loadout { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
+#task-loadout:empty { display: none; }
+.lo-head { font: 600 10px/1.6 var(--mono); letter-spacing: .1em; color: var(--muted);
+           margin-bottom: 2px; }
+.lo-row { display: grid; grid-template-columns: 46px 1fr auto; gap: 6px; align-items: baseline;
+          padding: 5px 6px; background: var(--panel-2); border-radius: 2px;
+          border-left: 2px solid var(--k); font: 11px/1.5 var(--mono); text-align: left;
+          width: 100%; border-top: 0; border-right: 0; border-bottom: 0; }
+.lo-row .t { color: var(--k); font-weight: 600; font-size: 10px; }
+.lo-row .n { color: var(--ink); font-family: var(--sans); font-size: 11.5px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lo-row .x { color: var(--muted); white-space: nowrap; font-size: 10px; }
+.lo-row.key { --k: #9aa7b8; cursor: pointer; }
+.lo-row.key:hover { outline: 1px solid #9aa7b8; }
+.lo-row.marker { --k: #b48cff; }
+.lo-row.plant  { --k: #b48cff; }
+.lo-row.give   { --k: #ffc848; }
+.lo-row.weapon { --k: var(--muted); }
+.lo-row .fir { color: #ff7a5c; }
+
+/* タスクの鍵で開く扉 */
+.task-door > span { position: absolute; }
+.task-door .mark { left: -6px; top: -6px; width: 12px; height: 12px;
+                   background: #9aa7b8; border: 2px solid #0a0c0d; border-radius: 2px;
+                   box-shadow: 0 0 7px rgba(154,167,184,.8); }
+.task-door .label { left: 11px; top: -7px; white-space: nowrap;
+                    font: 600 11px/1.4 var(--mono); color: #c4cedb;
+                    text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d; }
+
 #task-objectives { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
 .obj-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: baseline;
            padding: 5px 6px; background: var(--panel-2); border-radius: 2px; cursor: pointer;
@@ -413,6 +443,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
       <button type="button" id="btn-task-clear">解除</button>
       <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
     </div>
+    <div id="task-loadout"></div>
     <div id="task-objectives"></div>
   </div>
 

@@ -33,7 +33,10 @@ import { loadMapDb, rankMaps, nearestPoiDistance } from '../src/mapdb/index.js';
 import { validateSample, VERDICT, MapTracker } from '../src/verify/index.js';
 import { ScreenshotWatcher, isSupported } from '../src/watch/index.js';
 import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '../src/app/pins.js';
-import { loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints, OBJECTIVE_TYPE } from '../src/app/tasks.js';
+import {
+  loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints,
+  taskKeyDoors, taskLoadout, OBJECTIVE_TYPE,
+} from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
@@ -1128,6 +1131,123 @@ await check('目標の種類に日本語表示がある', () => {
   const known = [...types].filter((t) => OBJECTIVE_TYPE[t]);
   truthy(known.length >= 4, `対応している種類が少ない: ${known.length}/${types.size}`);
   return `${known.length}/${types.size} 種類に日本語表示（${known.slice(0, 4).map((t) => OBJECTIVE_TYPE[t]).join('・')} …）`;
+});
+
+/* --------------------------------------------------------------------- T18 */
+
+group('T18 タスクの持ち物と鍵→扉');
+
+await check('鍵の要るタスクに鍵名が入っている', () => {
+  const withKeys = customsTasks.filter((t) => (t.k || []).length);
+  truthy(withKeys.length >= 10, `鍵の要るタスクが少ない: ${withKeys.length}`);
+  for (const t of withKeys) {
+    for (const k of t.k) {
+      truthy(k.i && k.n, `鍵の情報が欠けている: ${JSON.stringify(k)}`);
+      truthy(k.n !== '?', `鍵名が解決できていない: ${t.n}`);
+      truthy(k.n.length >= 4, `略称のまま: ${k.n}`);
+    }
+  }
+  return `${withKeys.length} タスク（例: ${withKeys[0].k[0].n}）`;
+});
+
+await check('鍵が施錠扉と ID で結びつく', () => {
+  let matched = 0;
+  let checked = 0;
+  const examples = [];
+  for (const t of customsTasks) {
+    if (!(t.k || []).length) continue;
+    checked++;
+    const doors = taskKeyDoors(t, customsLm);
+    eq(doors.length, t.k.length, '鍵の数と結果の数が違う');
+    for (const d of doors) {
+      if (d.locks.length) {
+        matched++;
+        // 名前一致ではなく ID 一致であること
+        for (const lock of d.locks) eq(lock.k, d.key.i, '別の鍵の扉が混ざった');
+        if (examples.length < 2) examples.push(`${d.key.n} → 扉 ${d.locks.length} 箇所`);
+      }
+    }
+  }
+  truthy(matched > 0, '扉と結びつく鍵が 1 つも無い');
+  return `${checked} タスク中 ${matched} 件の鍵が扉と一致（${examples.join(' / ')}）`;
+});
+
+await check('持ち物が集約される', () => {
+  let found = null;
+  for (const t of customsTasks) {
+    const lo = taskLoadout(t, 'customs');
+    if (lo.bring.length) { found = { t, lo }; break; }
+  }
+  truthy(found, '持ち物のあるタスクが無い');
+  for (const b of found.lo.bring) {
+    truthy(b.i && b.n, `アイテム情報が欠けている: ${JSON.stringify(b)}`);
+    truthy(['marker', 'give', 'plant'].includes(b.kind), `種別が不正: ${b.kind}`);
+  }
+  // 同じものが 2 回出てきたら 1 行にまとまること
+  const ids = found.lo.bring.map((b) => b.i);
+  eq(new Set(ids).size, ids.length, '同じアイテムが重複している');
+  return `「${found.t.n}」: ${found.lo.bring.map((b) => b.n).join(' / ')}`;
+});
+
+await check('見つける系は持ち物に入らない', () => {
+  // findItem / findQuestItem は現地調達なので持ち込むものではない
+  for (const t of customsTasks) {
+    for (const o of t.o || []) {
+      if (['findItem', 'findQuestItem', 'visit', 'extract', 'shoot'].includes(o.t)) {
+        eq(o.it, undefined, `${t.n} の ${o.t} に持ち物が付いている`);
+      }
+    }
+  }
+  return '渡す・設置する系だけが持ち物になる';
+});
+
+await check('武器指定は数だけを持つ', () => {
+  // usingWeapon は 1 目標に数十丁並ぶ。一覧にすると使い物にならないので数だけ
+  let withWeapon = 0;
+  for (const t of customsTasks) {
+    for (const o of t.o || []) {
+      if (o.wp) {
+        withWeapon++;
+        eq(typeof o.wp, 'number', 'wp が数値でない');
+        truthy(o.wp > 0, 'wp が 0');
+      }
+    }
+  }
+  return withWeapon ? `${withWeapon} 目標に武器指定（数のみ保持）` : '武器指定のある目標は Customs には無し';
+});
+
+await check('カッパ必須フラグが鍵と衝突していない', () => {
+  // 以前は両方 "k" を使っていて、鍵を入れた時点で ★ が壊れる状態だった
+  const kappa = customsTasks.filter((t) => t.kap);
+  truthy(kappa.length > 0, 'カッパ必須のタスクが無い');
+  for (const t of kappa) {
+    truthy(taskLabel(t).includes('★'), `★ が付かない: ${t.n}`);
+    if (t.k) truthy(Array.isArray(t.k), 'k が配列でない（フラグと混ざった）');
+  }
+  return `${kappa.length} タスクが ★ 付き`;
+});
+
+await check('別マップの持ち物は出さない', () => {
+  // 複数マップにまたがるタスクで、そのマップに目標が無いものの持ち物は出さない
+  const multi = customsTasks.find((t) =>
+    (t.o || []).some((o) => (o.z || []).length && !(o.z || []).some((z) => z.m === 'customs')),
+  );
+  if (!multi) return '該当するタスクが無いため確認省略';
+  const lo = taskLoadout(multi, 'customs');
+  const isHere = (o) => (o.z || []).some((z) => z.m === 'customs') || (o.l || []).some((l) => l.m === 'customs');
+  const hereIds = new Set(
+    (multi.o || []).filter(isHere).flatMap((o) => [...(o.it || []).map((i) => i.i), ...(o.mk ? [o.mk.i] : [])]),
+  );
+  // 同じ道具を両方のマップで使うことがある（MS2000 マーカーなど）。
+  // 「別マップの目標にしか出てこないもの」だけが除外対象。
+  const awayOnly = (multi.o || [])
+    .filter((o) => (o.z || []).length && !isHere(o))
+    .flatMap((o) => [...(o.it || []).map((i) => i.i), ...(o.mk ? [o.mk.i] : [])])
+    .filter((id) => !hereIds.has(id));
+  for (const id of awayOnly) {
+    truthy(!lo.bring.some((b) => b.i === id), `別マップだけの持ち物が出ている: ${id}`);
+  }
+  return `「${multi.n}」で別マップ専用の持ち物 ${awayOnly.length} 件を除外（共用は残す）`;
 });
 
 /* --------------------------------------------------------------------- T15 */

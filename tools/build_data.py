@@ -138,6 +138,37 @@ def apply_translations(payload: dict, primary: dict, fallback: dict) -> int:
     return replaced
 
 
+def load_item_names(refresh: bool, wanted: set):
+    """必要なアイテムの表示名だけを引く。
+
+    items は 16MB あるがビルド時のみで、出力に載るのは実際に参照されるものだけ。
+    取れなければ空の辞書を返す（名前が出ないだけで他は動く）。
+    """
+    if not wanted:
+        return {}
+    try:
+        items = json.loads(fetch(SRC_ITEMS, "items.json", refresh))
+        ija = json.loads(fetch(SRC_ITEMS_LANG.format(lang="ja"), "items_ja.json", refresh))["data"]
+        ien = json.loads(fetch(SRC_ITEMS_LANG.format(lang="en"), "items_en.json", refresh))["data"]
+        pool = items.get("data", items)
+        pool = pool.get("items", pool)
+        out = {}
+        for iid in wanted:
+            rec = pool.get(iid) if isinstance(pool, dict) else None
+            if not rec:
+                continue
+            # 略称 ("USEC", "Cabin") では何か分からないので正式名称を使う
+            raw = rec.get("name") or rec.get("shortName") or ""
+            name = ija.get(raw) or ien.get(raw) or raw
+            if name:
+                out[iid] = name
+        print(f"  アイテム名を解決: {len(out)}/{len(wanted)} 件", file=sys.stderr)
+        return out
+    except Exception as exc:
+        print(f"  アイテム名は取得できませんでした（{exc}）", file=sys.stderr)
+        return {}
+
+
 def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
                     ja: dict, en: dict, mobs: dict, want_keys: bool):
     """脱出口以外の「名前の付いた地点」をマップごとに切り出す。
@@ -163,23 +194,7 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
             for lock in m.get("locks") or []:
                 if lock.get("key"):
                     wanted.add(lock["key"])
-        if wanted:
-            try:
-                items = json.loads(fetch(SRC_ITEMS, "items.json", refresh))
-                ija = json.loads(fetch(SRC_ITEMS_LANG.format(lang="ja"), "items_ja.json", refresh))["data"]
-                ien = json.loads(fetch(SRC_ITEMS_LANG.format(lang="en"), "items_en.json", refresh))["data"]
-                pool = items.get("data", items)
-                pool = pool.get("items", pool)
-                for iid in wanted:
-                    rec = pool.get(iid) if isinstance(pool, dict) else None
-                    if not rec:
-                        continue
-                    # 略称 ("USEC", "Cabin") だと何の鍵か分からないので正式名称を使う
-                    raw_name = rec.get("name") or rec.get("shortName") or ""
-                    key_name[iid] = ija.get(raw_name) or ien.get(raw_name) or raw_name
-                print(f"  鍵の名前を解決: {len(key_name)}/{len(wanted)} 件", file=sys.stderr)
-            except Exception as exc:
-                print(f"  鍵の名前は取得できませんでした（{exc}）。扉だけ出します", file=sys.stderr)
+        key_name = load_item_names(refresh, wanted)
 
     out = {}
 
@@ -216,6 +231,10 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
             if not lock.get("position"):
                 continue
             rec = {"t": lock.get("lockType") or "door", "p": pos3(lock["position"])}
+            # 鍵の ID も残す。タスクの必要な鍵と突き合わせるとき、
+            # 名前の文字列一致ではなく ID で照合するため
+            if lock.get("key"):
+                rec["k"] = lock["key"]
             name = key_name.get(lock.get("key"))
             if name:
                 rec["n"] = name
@@ -303,6 +322,31 @@ def build_tasks(refresh: bool, id_to_key: dict):
     tasks = payload["data"]["tasks"]
     tasks = list(tasks.values()) if isinstance(tasks, dict) else (tasks or [])
 
+    # 持ち物として出すアイテムの名前を引く。
+    # usingWeapon は 1 目標に数十丁並ぶので一覧にせず「指定あり」とだけ出す。
+    wanted_items = set()
+    for t in tasks:
+        for nk in t.get("neededKeys") or []:
+            wanted_items.update(nk.get("keys") or [])
+        for o in t.get("objectives") or []:
+            for lst in o.get("requiredKeys") or []:
+                wanted_items.update(lst)
+            if o.get("markerItem"):
+                wanted_items.add(o["markerItem"])
+            if o.get("items") and o.get("type") in (
+                "giveItem", "plantItem", "plantQuestItem", "mark", "buildWeapon",
+            ):
+                wanted_items.update(o["items"])
+    item_name = load_item_names(refresh, wanted_items)
+
+    def item_rec(iid, count=None, fir=False):
+        rec = {"i": iid, "n": item_name.get(iid, "?")}
+        if count and count > 1:
+            rec["c"] = count
+        if fir:
+            rec["f"] = 1
+        return rec
+
     def rnd(v):
         return round(float(v), 1)
 
@@ -336,6 +380,20 @@ def build_tasks(refresh: bool, id_to_key: dict):
             entry = {"d": o.get("description"), "t": o.get("type")}
             if o.get("optional"):
                 entry["opt"] = 1
+            # 持ち込むもの。渡す・設置する系だけを対象にする。
+            # 「見つける」系は現地調達なので持ち物には入れない
+            if o.get("items") and o.get("type") in (
+                "giveItem", "plantItem", "plantQuestItem", "mark", "buildWeapon",
+            ):
+                entry["it"] = [
+                    item_rec(i, o.get("count"), bool(o.get("foundInRaid"))) for i in o["items"][:8]
+                ]
+                if len(o["items"]) > 8:
+                    entry["itMore"] = len(o["items"]) - 8
+            if o.get("markerItem"):
+                entry["mk"] = item_rec(o["markerItem"])
+            if o.get("usingWeapon"):
+                entry["wp"] = len(o["usingWeapon"])
             if zs:
                 entry["z"] = zs
             if locs:
@@ -345,6 +403,19 @@ def build_tasks(refresh: bool, id_to_key: dict):
         if not objectives:
             continue
 
+        # 必要な鍵。neededKeys はマップ別に入っている
+        keys_by_map = {}
+        for nk in t.get("neededKeys") or []:
+            mk = id_to_key.get(nk.get("map"))
+            if mk:
+                keys_by_map.setdefault(mk, []).extend(nk.get("keys") or [])
+        # 目標ごとの requiredKeys は、その目標があるマップに紐づける
+        for o in t.get("objectives") or []:
+            omaps = {id_to_key.get(x) for x in (o.get("maps") or [])} - {None}
+            for lst in o.get("requiredKeys") or []:
+                for mk in omaps:
+                    keys_by_map.setdefault(mk, []).extend(lst)
+
         rec = {
             "id": t.get("id"),
             "n": t.get("name"),
@@ -353,7 +424,7 @@ def build_tasks(refresh: bool, id_to_key: dict):
             "o": objectives,
         }
         if t.get("kappaRequired"):
-            rec["k"] = 1
+            rec["kap"] = 1
         if t.get("wikiLink"):
             rec["w"] = t["wikiLink"]
 
@@ -365,7 +436,12 @@ def build_tasks(refresh: bool, id_to_key: dict):
             for loc in obj.get("l", []):
                 keys.add(loc["m"])
         for key in keys:
-            by_map.setdefault(key, []).append(rec)
+            # そのマップで要る鍵だけを載せる（重複は落とす）
+            mine = list(dict.fromkeys(keys_by_map.get(key) or []))
+            entry = dict(rec)
+            if mine:
+                entry["k"] = [item_rec(i) for i in mine]
+            by_map.setdefault(key, []).append(entry)
 
     out_dir = DATA / "tasks"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -268,7 +268,7 @@ export class MapView {
    * @param {string} mapKey
    * @param {(index:number) => void} [onPick] 目標をクリックしたとき
    */
-  setTask(task, mapKey, onPick = () => {}) {
+  setTask(task, mapKey, onPick = () => {}, keyDoors = []) {
     const L = this.L;
     if (this.taskLayer) this.taskLayer.remove();
     this.taskLayer = null;
@@ -277,6 +277,22 @@ export class MapView {
     const aff = this.mapData.affine;
     this.taskLayer = L.layerGroup().addTo(this.map);
     const COLOR = '#b48cff'; // 脱出口（緑/橙/黄）ともピン（琥珀）とも被らない色
+
+    // そのタスクの鍵で開く扉。レイヤのオンオフに関係なく出す。
+    // 「鍵はこれ、扉はここ」が 1 回の選択で揃うようにするため。
+    for (const { key, locks } of keyDoors) {
+      for (const lock of locks) {
+        const marker = L.marker(worldToLatLng(aff, lock.p[0], lock.p[2]), {
+          icon: L.divIcon({
+            className: 'task-door',
+            html: `<span class="mark"></span><span class="label">${escapeHtml(key.n)}</span>`,
+            iconSize: [0, 0],
+          }),
+          zIndexOffset: 650,
+        }).addTo(this.taskLayer);
+        marker.bindTooltip(`この鍵で開く扉: ${escapeHtml(key.n)}`);
+      }
+    }
 
     (task.o || []).forEach((objective, i) => {
       const zones = (objective.z || []).filter((z) => z.m === mapKey);

@@ -106,8 +106,46 @@ export function filterTasks(tasks, query) {
   });
 }
 
+/**
+ * そのタスクで使う鍵に対応する施錠扉を、地点データから拾う。
+ * 名前の文字列ではなく鍵の ID で照合する。
+ * @param {Object} task
+ * @param {Object} landmarks loadLandmarks の戻り値
+ * @returns {{key:Object, locks:Object[]}[]}
+ */
+export function taskKeyDoors(task, landmarks) {
+  const locks = (landmarks && landmarks.lock) || [];
+  return (task.k || []).map((key) => ({
+    key,
+    locks: locks.filter((l) => l.k === key.i),
+  }));
+}
+
+/** そのタスクで持っていくものを 1 つの配列にまとめる。 */
+export function taskLoadout(task, mapKey) {
+  const bring = [];
+  let weaponSpec = 0;
+  for (const o of task.o || []) {
+    const g = objectiveGeometry(o, mapKey);
+    // 別マップの目標の持ち物は出さない（そのマップには要らない）
+    const here = g.zones.length > 0 || g.spots.length > 0 || !(o.z || o.l);
+    if (!here) continue;
+    if (o.mk) bring.push({ ...o.mk, kind: 'marker' });
+    for (const it of o.it || []) bring.push({ ...it, kind: o.t === 'giveItem' ? 'give' : 'plant' });
+    if (o.wp) weaponSpec = Math.max(weaponSpec, o.wp);
+  }
+  // 同じものが複数の目標に出てきたらまとめる
+  const merged = new Map();
+  for (const b of bring) {
+    const prev = merged.get(b.i);
+    if (prev) prev.c = (prev.c || 1) + (b.c || 1);
+    else merged.set(b.i, { ...b });
+  }
+  return { bring: [...merged.values()], weaponSpec };
+}
+
 /** 一覧に出すラベル。 */
 export function taskLabel(task) {
   const lv = task.lv ? ` Lv${task.lv}` : '';
-  return `[${task.tr}${lv}] ${task.n}${task.k ? ' ★' : ''}`;
+  return `[${task.tr}${lv}] ${task.n}${task.kap ? ' ★' : ''}`;
 }

@@ -16,7 +16,9 @@ import { validateSample, VERDICT, isDrawable, MapTracker } from '../verify/index
 import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
 import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
-import { loadTasks, filterTasks, taskLabel, objectiveGeometry, OBJECTIVE_TYPE } from './tasks.js';
+import {
+  loadTasks, filterTasks, taskLabel, objectiveGeometry, taskKeyDoors, taskLoadout, OBJECTIVE_TYPE,
+} from './tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from './landmarks.js';
 
 const $ = (id) => document.getElementById(id);
@@ -213,6 +215,7 @@ async function loadMapTasks(mapData) {
   renderObjectives();
   $('task-wiki').hidden = true;
   state.view.setTask(null, state.selectedKey);
+  $('task-loadout').innerHTML = '';
 }
 
 function renderTaskOptions() {
@@ -246,7 +249,9 @@ function selectTask(id) {
   const wiki = $('task-wiki');
   wiki.hidden = !(state.activeTask && state.activeTask.w);
   if (!wiki.hidden) wiki.href = state.activeTask.w;
-  state.view.setTask(state.activeTask, state.selectedKey, focusObjective);
+  const doors = state.activeTask ? taskKeyDoors(state.activeTask, state.landmarks) : [];
+  state.view.setTask(state.activeTask, state.selectedKey, focusObjective, doors);
+  renderLoadout(doors);
   renderObjectives();
 }
 
@@ -257,6 +262,45 @@ function focusObjective(i) {
   const p = g.zones[0] ? { x: g.zones[0].p[0], z: g.zones[0].p[2] }
     : g.spots[0] ? { x: g.spots[0][0], z: g.spots[0][2] } : null;
   if (p) state.view.focusWorld(p.x, p.z);
+}
+
+/** 持ち物（必要な鍵・持ち込むもの・装備指定）を出す。 */
+function renderLoadout(doors) {
+  const box = $('task-loadout');
+  box.innerHTML = '';
+  if (!state.activeTask) return;
+
+  const { bring, weaponSpec } = taskLoadout(state.activeTask, state.selectedKey);
+  if (!doors.length && !bring.length && !weaponSpec) return;
+
+  const head = document.createElement('div');
+  head.className = 'lo-head';
+  head.textContent = '持ち物';
+  box.appendChild(head);
+
+  const row = (cls, type, name, extra, onClick) => {
+    const el = document.createElement(onClick ? 'button' : 'div');
+    if (onClick) el.type = 'button';
+    el.className = 'lo-row ' + cls;
+    el.innerHTML =
+      `<span class="t">${escapeHtml(type)}</span>` +
+      `<span class="n" title="${escapeHtml(name)}">${escapeHtml(name)}</span>` +
+      `<span class="x">${extra}</span>`;
+    if (onClick) el.addEventListener('click', onClick);
+    box.appendChild(el);
+  };
+
+  for (const { key, locks } of doors) {
+    const extra = locks.length ? `扉 ${locks.length} 箇所` : '扉は別マップ';
+    row('key', '鍵', key.n, extra, locks.length ? () => state.view.focusWorld(locks[0].p[0], locks[0].p[2]) : null);
+  }
+  for (const it of bring) {
+    const label = it.kind === 'marker' ? 'マーカー' : it.kind === 'give' ? '納品' : '設置';
+    const qty = it.c && it.c > 1 ? `×${it.c}` : '';
+    const fir = it.f ? '<span class="fir">要FiR</span>' : '';
+    row(it.kind, label, it.n, `${qty}${qty && fir ? ' ' : ''}${fir}`);
+  }
+  if (weaponSpec) row('weapon', '装備', '使用武器の指定あり', `${weaponSpec} 種`);
 }
 
 function renderObjectives() {
