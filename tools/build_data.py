@@ -20,6 +20,7 @@
 import argparse
 import json
 import math
+import os
 import re
 import struct
 import sys
@@ -120,6 +121,20 @@ def resolve_path(node, parts):
         yield from resolve_path(node[seg], rest)
     else:
         yield node, seg
+
+
+def write_atomic(path: Path, data) -> None:
+    """同じディレクトリの一時ファイルに書いてから置き換える。
+
+    書きかけで落ちても、切り詰められた JSON が配信物として残らない。
+    os.replace は同一ボリューム上では不可分。
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    if isinstance(data, str):
+        tmp.write_text(data, encoding="utf-8")
+    else:
+        tmp.write_bytes(data)
+    os.replace(tmp, path)
 
 
 def apply_translations(payload: dict, primary: dict, fallback: dict) -> int:
@@ -321,8 +336,9 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
 
     counts = {}
     for key, groups in out.items():
-        (out_dir / f"{key}.json").write_text(
-            json.dumps(groups, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+        write_atomic(
+            out_dir / f"{key}.json",
+            json.dumps(groups, ensure_ascii=False, separators=(",", ":")),
         )
         counts[key] = {kind: len(v) for kind, v in groups.items()}
 
@@ -344,6 +360,9 @@ def build_tasks(refresh: bool, id_to_key: dict):
     payload = json.loads(fetch(SRC_TASKS, "tasks.json", refresh))
     ja = json.loads(fetch(SRC_TASKS_LANG.format(lang="ja"), "tasks_ja.json", refresh))["data"]
     en = json.loads(fetch(SRC_TASKS_LANG.format(lang="en"), "tasks_en.json", refresh))["data"]
+    # 上流の ja 辞書には課題名の和訳が 1 件も無く（517 件すべて英語が返る）、
+    # 課題名は常に英語になる。逆に目標の description は和訳されている。
+    # つまり検索は「英語の課題名」と「日本語の目標文」の両方に当たる必要がある。
     n = apply_translations(payload, ja, en)
     print(f"  タスクの表示名を解決: {n} 件", file=sys.stderr)
 
@@ -509,8 +528,9 @@ def build_tasks(refresh: bool, id_to_key: dict):
         if key == ANY_MAP:
             for r in recs:
                 r["any"] = 1
-        (out_dir / f"{key}.json").write_text(
-            json.dumps(recs, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+        write_atomic(
+            out_dir / f"{key}.json",
+            json.dumps(recs, ensure_ascii=False, separators=(",", ":")),
         )
         counts[key] = len(recs)
 
@@ -910,7 +930,7 @@ def build():
         maps_out.append(entry)
 
     DATA.mkdir(parents=True, exist_ok=True)
-    (DATA / "poi.bin").write_bytes(bytes(blob))
+    write_atomic(DATA / "poi.bin", bytes(blob))
     svg_files = sorted(p.name for p in MAPS.glob("*.svg")) if MAPS.exists() else []
     any_count = task_counts.get(ANY_MAP, 0)
     db = {
@@ -926,8 +946,9 @@ def build():
         "poiTotal": len(blob) // 6,
         "maps": maps_out,
     }
-    (DATA / "mapdb.json").write_text(
-        json.dumps(db, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    write_atomic(
+        DATA / "mapdb.json",
+        json.dumps(db, ensure_ascii=False, separators=(",", ":")),
     )
 
     if CLAMPED:
@@ -1004,7 +1025,7 @@ def write_readme_summary(db: dict, task_counts: dict, landmark_counts: dict):
         text,
         flags=re.S,
     )
-    readme.write_text(text, encoding="utf-8")
+    write_atomic(readme, text)
     print("  README の数値を更新", file=sys.stderr)
 
 
@@ -1021,7 +1042,7 @@ def bump_service_worker(built_at: str):
     stamp = "eft-gps-" + built_at.replace("-", "").replace(":", "").replace(" ", "-")
     new = re.sub(r"const VERSION = '[^']*';", f"const VERSION = '{stamp}';", text, count=1)
     if new != text:
-        sw.write_text(new, encoding="utf-8")
+        write_atomic(sw, new)
         print(f"  sw.js の VERSION を {stamp} に更新", file=sys.stderr)
 
 

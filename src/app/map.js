@@ -10,7 +10,7 @@
  * Leaflet は vendor/leaflet からグローバル L として読み込まれている前提。
  */
 
-import { applyAffine, worldToLatLng, latLngToWorld, headingToScreenDeg } from '../geo/index.js';
+import { applyAffine, worldToLatLng, latLngToWorld, headingToScreenDeg, bearingDeg } from '../geo/index.js';
 
 /** 陣営ごとの色。地図の配色 (青緑・灰・カーキ) から浮くものを選んでいる。 */
 export const FACTION_COLOR = {
@@ -66,6 +66,13 @@ export class MapView {
 
     /** ピンを置くモード。次のクリックで onMapClick を呼ぶ */
     this.placing = false;
+    /** 距離を測るモード。2 点のクリックで 1 本の線になる */
+    this.measuring = false;
+    /** @type {{x:number,z:number}|null} 計測の 1 点目 */
+    this.measureFrom = null;
+    this.measureLayer = null;
+    /** @type {(m:{dist:number,bearing:number}|null) => void} */
+    this.onMeasure = () => {};
     /** @type {(world:{x:number,z:number}) => void} */
     this.onMapClick = () => {};
     /** @type {(id:string) => void} */
@@ -79,24 +86,83 @@ export class MapView {
     syncZoomClass();
 
     this.map.on('click', (ev) => {
-      if (!this.placing || !this.mapData || !this.mapData.affine) return;
+      if (!this.mapData || !this.mapData.affine) return;
       const w = latLngToWorld(this.mapData.affine, ev.latlng.lat, ev.latlng.lng);
-      if (w) this.onMapClick(w);
+      if (!w) return;
+      if (this.measuring) this.measureClick(w);
+      else if (this.placing) this.onMapClick(w);
     });
+  }
+
+  /**
+   * 距離を測るモードの切り替え。
+   * 「あの脱出口まで何 m か」は方位より先に知りたい情報だが、
+   * 現在地からの距離しか出せていなかった。
+   */
+  setMeasuring(on) {
+    this.measuring = !!on;
+    this.map.getContainer().classList.toggle('placing-pin', this.measuring || this.placing);
+    if (!this.measuring) this.clearMeasure();
+  }
+
+  clearMeasure() {
+    this.measureFrom = null;
+    if (this.measureLayer) {
+      this.measureLayer.remove();
+      this.measureLayer = null;
+    }
+    this.onMeasure(null);
+  }
+
+  /** 計測の 1 クリック。奇数回目で始点、偶数回目で線を引く。 */
+  measureClick(w) {
+    const L = this.L;
+    const aff = this.mapData.affine;
+    if (!this.measureFrom) {
+      this.clearMeasure();
+      this.measureFrom = w;
+      this.measureLayer = L.circleMarker(worldToLatLng(aff, w.x, w.z), {
+        radius: 4, color: '#e8c07a', weight: 2, fillOpacity: 1, interactive: false,
+      }).addTo(this.map);
+      return;
+    }
+    const a = this.measureFrom;
+    const dx = w.x - a.x;
+    const dz = w.z - a.z;
+    const dist = Math.hypot(dx, dz);
+    // ワールド座標はメートル。方位は現在地の表示と同じ定義を使う
+    const bearing = bearingDeg(a.x, a.z, w.x, w.z);
+    if (this.measureLayer) this.measureLayer.remove();
+    this.measureLayer = L.layerGroup([
+      L.polyline([worldToLatLng(aff, a.x, a.z), worldToLatLng(aff, w.x, w.z)], {
+        color: '#e8c07a', weight: 2, className: 'measure-line', interactive: false,
+      }),
+      L.circleMarker(worldToLatLng(aff, a.x, a.z), {
+        radius: 4, color: '#e8c07a', weight: 2, fillOpacity: 1, interactive: false,
+      }),
+      L.circleMarker(worldToLatLng(aff, w.x, w.z), {
+        radius: 4, color: '#e8c07a', weight: 2, fillOpacity: 1, interactive: false,
+      }),
+    ]).addTo(this.map);
+    this.measureFrom = null;
+    this.onMeasure({ dist, bearing });
   }
 
   /** ピン設置モードの切り替え。カーソルも変える。 */
   setPlacing(on) {
     this.placing = !!on;
     const el = this.map.getContainer();
-    el.classList.toggle('placing-pin', this.placing);
+    el.classList.toggle('placing-pin', this.placing || this.measuring);
   }
 
   /** マップを切り替える。SVG が無いマップでは false を返す。 */
   async setMap(mapData) {
     this.mapData = mapData;
     this.trail = [];
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer', 'hintLayer']) {
+    // 計測の途中で地図が変わったら、1 点目は捨てる（別の地図の座標なので）
+    this.measureFrom = null;
+    this.onMeasure(null);
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer', 'hintLayer', 'measureLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -424,7 +490,7 @@ export class MapView {
       onAdd() {
         const el = L.DomUtil.create('div', 'north-rose');
         el.innerHTML = `<span class="needle" style="transform:rotate(${deg}deg)"></span><span class="n">N</span>`;
-        el.title = `北（ワールドの方位 ${northDeg}°）`;
+        el.title = '北。サイドバーの「方位」もこの北を基準にした値です';
         return el;
       },
     });

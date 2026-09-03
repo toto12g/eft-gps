@@ -149,6 +149,39 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 .lm-side-pmc .lm-mark { --c: #ff9db0; }
 .lm-side-scav .lm-mark { --c: #8fd6ff; }
 
+/* サイドバーの折りたたみ。狭い画面では地図がほとんど残らない */
+body.side-collapsed { grid-template-columns: 0 1fr; }
+body.side-collapsed #side { display: none; }
+#side > div:first-child { display: flex; align-items: flex-start; gap: 8px; }
+#side > div:first-child h1 { flex: 1 1 auto; min-width: 0; }
+#btn-side {
+  /* 汎用の button は width:100% なので、ここで打ち消さないと見出しを潰す */
+  flex: 0 0 auto; width: auto; align-self: center;
+  padding: 2px 8px; font: 600 14px/1.2 var(--mono); background: transparent;
+  border: 1px solid var(--rule); border-radius: 4px; color: var(--muted); cursor: pointer;
+}
+#btn-side:hover { color: var(--ink); border-color: var(--muted); }
+#btn-side-show {
+  width: auto; position: absolute; left: 8px; top: 8px; z-index: 500; display: none;
+  background: var(--panel); padding: 4px 9px; border: 1px solid var(--rule);
+  border-radius: 4px; color: var(--muted); cursor: pointer; font: 600 14px/1.2 var(--mono);
+}
+body.side-collapsed #btn-side-show { display: block; }
+
+/* 更新の通知 */
+#update-bar {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 900;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 7px 12px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.5);
+}
+#update-bar button {
+  margin-left: 8px; padding: 2px 10px; border: 1px solid var(--accent);
+  background: transparent; color: var(--accent); border-radius: 4px; cursor: pointer;
+}
+
+/* 距離の計測線 */
+.measure-line { stroke-dasharray: 5 4; }
+
 /* 方位ローズ */
 .north-rose {
   position: relative; width: 42px; height: 42px; border-radius: 50%;
@@ -434,10 +467,16 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
   </div>
 </div>
 
+<div id="update-bar" hidden>
+  新しい版が届いています。<button type="button" id="btn-reload">再読み込み</button>
+</div>
+
 <div id="side">
 
   <div>
     <h1>EFT 測位クライアント<small>screenshot filename → position</small></h1>
+    <button type="button" id="btn-side" title="サイドバーを畳む（地図を広く使う）"
+            aria-expanded="true">‹</button>
   </div>
 
   <div>
@@ -498,6 +537,14 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
         <span class="txt">ピンを置く</span>
       </button>
       <button type="button" id="btn-pins-clear">すべて消す</button>
+    </div>
+    <div class="pin-tools">
+      <button type="button" id="btn-measure" class="pin-toggle" aria-pressed="false"
+              title="地図を 2 回クリックすると、その 2 点間の距離が出ます">
+        <span class="glyph" aria-hidden="true"></span>
+        <span class="txt">距離を測る</span>
+      </button>
+      <output id="measure-out" class="hint-line"></output>
     </div>
     <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
     <div id="pins"></div>
@@ -562,6 +609,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
   </div>
 </div>
 
+<button type="button" id="btn-side-show" title="サイドバーを出す">›</button>
 <div id="map"></div>
 
 <script src="./vendor/leaflet/leaflet.js"></script>

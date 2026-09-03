@@ -95,6 +95,7 @@ const state = {
   activeTask: null,
   activePinId: localStorage.getItem('eft-gps.activePin') || null,
   placing: false,
+  measuring: false,
   received: 0,
   skipped: 0,
 };
@@ -180,6 +181,7 @@ async function boot() {
   setupWatcher();
   setupGuide();
   setupPins();
+  setupSidebar();
   setupTasks();
 
   await selectMap(state.selectedKey);
@@ -508,6 +510,54 @@ function renderObjectives() {
   });
 }
 
+/* --------------------------------------------------------------- 方位の表示 */
+
+const CARDINALS = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+
+/**
+ * ワールドの向きを、真北を基準にした方位に直して文字にする。
+ *
+ * ワールド座標の +Z は北とは限らず、Customs では 180° ずれている。
+ * 図の上に方位ローズを出した以上、印字する数字も同じ基準でないと
+ * 「北を指す針」と「方位 238°」が食い違って読めない。
+ * mapdb の northDeg（= coordinateToCardinalRotation）で揃える。
+ *
+ * 相対表示（「左 63°」など）はワールド上の差なので、この変換の影響を受けない。
+ */
+function compassText(worldDeg, digits = 0) {
+  const m = state.db && state.db.byKey.get(state.selectedKey);
+  const north = m && typeof m.northDeg === 'number' ? m.northDeg : null;
+  if (north === null) return `${worldDeg.toFixed(digits)}°`; // 基準が無ければ生の値
+  const c = ((worldDeg - north) % 360 + 360) % 360;
+  return `${c.toFixed(digits)}° ${CARDINALS[Math.round(c / 45) % 8]}`;
+}
+
+/* ------------------------------------------------- サイドバーの折りたたみ */
+
+/**
+ * 幅 340px を固定で取っていたので、ノート PC では地図が狭かった。
+ * 畳んだ状態は覚えておく。Leaflet は自分でサイズ変化に気づけないので、
+ * 切り替えのたびに invalidateSize を呼ぶ。
+ */
+function setupSidebar() {
+  const btn = $('btn-side');
+  const show = $('btn-side-show');
+  const apply = (collapsed) => {
+    document.body.classList.toggle('side-collapsed', collapsed);
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    try {
+      localStorage.setItem('eft-gps.sideCollapsed', collapsed ? '1' : '0');
+    } catch { /* 保存できなくても動作には影響しない */ }
+    // 折り返しのアニメーションは無いので、次のフレームで足りる
+    requestAnimationFrame(() => state.view.map.invalidateSize());
+  };
+  btn.addEventListener('click', () => apply(true));
+  show.addEventListener('click', () => apply(false));
+  let saved = '0';
+  try { saved = localStorage.getItem('eft-gps.sideCollapsed') || '0'; } catch { /* 既定は開いた状態 */ }
+  if (saved === '1') apply(true);
+}
+
 /* ------------------------------------------------------------------ ピン */
 
 function setupPins() {
@@ -528,8 +578,27 @@ function setupPins() {
   };
 
   $('btn-place').addEventListener('click', () => setPlacing(!state.placing));
+
+  // 距離を測る。ピンと同時にはオンにしない（クリックの行き先が曖昧になる）
+  const measureBtn = $('btn-measure');
+  const measureOut = $('measure-out');
+  state.view.onMeasure = (m) => {
+    measureOut.textContent = m
+      ? `${m.dist.toFixed(1)} m　方位 ${compassText(m.bearing)}`
+      : state.measuring ? '始点をクリックしてください。' : '';
+  };
+  measureBtn.addEventListener('click', () => {
+    const on = !state.measuring;
+    if (on && state.placing) setPlacing(false);
+    state.measuring = on;
+    measureBtn.setAttribute('aria-pressed', String(state.measuring));
+    state.view.setMeasuring(state.measuring);
+    state.view.onMeasure(null);
+  });
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && state.placing) setPlacing(false);
+    if (ev.key !== 'Escape') return;
+    if (state.placing) setPlacing(false);
+    if (state.measuring) measureBtn.click();
   });
   $('btn-pins-clear').addEventListener('click', () => {
     if (!state.pins.length) return;
@@ -542,6 +611,12 @@ function setupPins() {
 
 function setPlacing(on) {
   state.placing = on;
+  // ピンを置く間は計測を止める。クリックの行き先が 2 つあると迷う
+  if (on && state.measuring) {
+    state.measuring = false;
+    $('btn-measure').setAttribute('aria-pressed', 'false');
+    state.view.setMeasuring(false);
+  }
   state.view.setPlacing(on);
   const btn = $('btn-place');
   btn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -941,7 +1016,7 @@ function renderSample(sample, verdict) {
     ['位置', `x ${sample.x.toFixed(2)}　y ${sample.y.toFixed(2)}　z ${sample.z.toFixed(2)}`],
     ['方位', yaw === null
       ? (pitch === null ? '—' : `真${pitch > 0 ? '下' : '上'}向き（方位が定義できない）`)
-      : `${yaw.toFixed(1)}°（見上げ ${pitch.toFixed(1)}°）`],
+      : `${compassText(yaw, 1)}（見上げ ${pitch.toFixed(1)}°）`],
     ['ゲーム内時刻', sample.gameTime === null ? '—' : `${formatGameTime(sample.gameTime)}（${sample.gameTime}）`],
     ['撮影', sample.takenAtMs ? new Date(sample.takenAtMs).toLocaleString() : '—'],
   ];
@@ -973,7 +1048,7 @@ function renderSample(sample, verdict) {
     const b = pinBearing(sample, activePin, yaw);
     rows.push([
       '目的地',
-      `${activePin.name}　${b.dist.toFixed(0)} m　方位 ${b.bearing.toFixed(0)}°` +
+      `${activePin.name}　${b.dist.toFixed(0)} m　方位 ${compassText(b.bearing)}` +
         (b.relative === null ? '' : `（${relativeText(b.relative)}）`),
     ]);
   }
@@ -986,7 +1061,7 @@ function renderSample(sample, verdict) {
     rows.push([
       '最寄り脱出口',
       `${exit.name}${exit.needsSwitch ? '（要スイッチ）' : ''}　` +
-        `${exit.dist.toFixed(0)} m　方位 ${exit.bearing.toFixed(0)}°` +
+        `${exit.dist.toFixed(0)} m　方位 ${compassText(exit.bearing)}` +
         (exit.relative === null ? '' : `（${relativeText(exit.relative)}）`),
     ]);
   }
@@ -1085,8 +1160,22 @@ function escapeHtml(s) {
 // file:// では登録できないので、その場合は静かに諦める（アプリ自体は動く）。
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      // sw.js は install で skipWaiting するので、新しい版は即座に受け持ちを
+      // 引き継ぐ。ページ側は古い JS のまま動き続けるため、データと合わなく
+      // なることがある。黙って直らないより、再読み込みを勧める。
+      let first = !navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (first) { first = false; return; } // 初回インストールは通知しない
+        const bar = document.getElementById('update-bar');
+        if (bar) bar.hidden = false;
+      });
+      // 開いたままのタブでも、たまに更新を見に行く（30 分ごと）
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+    }).catch(() => {});
   });
+  const reload = document.getElementById('btn-reload');
+  if (reload) reload.addEventListener('click', () => location.reload());
 }
 
 boot().catch((err) => {

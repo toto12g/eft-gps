@@ -1239,6 +1239,34 @@ await check('目標の種類に日本語表示がある', () => {
 /* --------------------------------------------------------------------- T24 */
 
 group('T24 追加レイヤと方位（検収 B-3 / B-4 / B-5 / E-3）');
+await check('印字する方位が方位ローズと同じ基準になっている', () => {
+  // ワールドの +Z は北ではない。Customs は 180° ずれている。
+  // 図に北の針を出した以上、数字も真北基準でないと読めない。
+  const north = db.byKey.get('customs').northDeg;
+  eq(north, 180, 'customs の北の基準');
+  const compass = (worldDeg) => ((worldDeg - north) % 360 + 360) % 360;
+  // 実サンプル: ワールド方位 238.8° → 真北基準 58.8°（北東寄り）
+  const s = parseScreenshotName(CUSTOMS_RAID[0]);
+  const yaw = quatToYawDeg(s.q);
+  close(compass(yaw), (yaw - 180 + 360) % 360, 1e-9, '変換式');
+  truthy(compass(yaw) > 0 && compass(yaw) < 90, `北東の象限のはず: ${compass(yaw).toFixed(1)}°`);
+  // 画面上(0°)を指す向きは、真北基準で 0° になる
+  const up = db.maps.filter((m) => m.affine && typeof m.northDeg === 'number')
+    .every((m) => Math.abs(((m.northDeg - m.northDeg) % 360 + 360) % 360) < 1e-9);
+  truthy(up, '北の向きは常に真北基準で 0°');
+  return `ワールド ${yaw.toFixed(1)}° → 真北基準 ${compass(yaw).toFixed(1)}°`;
+});
+
+await check('相対方位はこの変換の影響を受けない', () => {
+  // 「左 63°」のような案内はワールド上の差なので、基準の取り方で変わらない
+  const north = 180;
+  const a = 238.8, b = 176.0;
+  const rel = angleDiffDeg(b, a);
+  const relCompass = angleDiffDeg((b - north + 360) % 360, (a - north + 360) % 360);
+  close(rel, relCompass, 1e-9, '相対角が基準で変わってしまう');
+  return `相対 ${rel.toFixed(1)}° は基準を変えても同じ`;
+});
+
 
 await check('スイッチが要る脱出口に印が付いている', () => {
   // 印が無いと「最寄りの脱出口」として無条件のものと同じ顔で案内されてしまう。

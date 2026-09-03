@@ -118,6 +118,8 @@ export function filterTasks(tasks, query) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return tasks;
   return tasks.filter((t) => {
+    // 課題名は上流に和訳が無く常に英語、目標文は和訳される。
+    // 両方を見るので、どちらの言語で打っても引ける
     if ((t.n || '').toLowerCase().includes(q)) return true;
     if ((t.tr || '').toLowerCase().includes(q)) return true;
     return (t.o || []).some((o) => (o.d || '').toLowerCase().includes(q));
