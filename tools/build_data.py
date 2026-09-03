@@ -569,6 +569,7 @@ def build():
     db = {
         "version": 1,
         "generated": "build_data.py",
+        "builtAt": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
         "svgFiles": svg_files,
         "poiUnit": "decimetre",
         "poiStride": 3,

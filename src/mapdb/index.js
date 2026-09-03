@@ -29,12 +29,17 @@
  * @returns {Promise<{version:number, maps:MapEntry[], byKey:Map<string,MapEntry>}>}
  */
 export async function loadMapDb(baseUrl = './data/', fetchImpl = fetch) {
+  // cache: 'no-cache' で毎回サーバに確認しに行く（中身が同じなら 304 で軽い）。
+  // GitHub Pages は Cache-Control: max-age=600 を返すため、これが無いと
+  // 10 分間ブラウザが古いデータを使い続け、新しいコードと組み合わさって
+  // 「一覧が空になる」ような食い違いが起きる。
+  const opts = { cache: 'no-cache' };
   const [meta, buf] = await Promise.all([
-    fetchImpl(baseUrl + 'mapdb.json').then((r) => {
+    fetchImpl(baseUrl + 'mapdb.json', opts).then((r) => {
       if (!r.ok) throw new Error(`mapdb.json: ${r.status}`);
       return r.json();
     }),
-    fetchImpl(baseUrl + 'poi.bin').then((r) => {
+    fetchImpl(baseUrl + 'poi.bin', opts).then((r) => {
       if (!r.ok) throw new Error(`poi.bin: ${r.status}`);
       return r.arrayBuffer();
     }),
@@ -52,6 +57,7 @@ export async function loadMapDb(baseUrl = './data/', fetchImpl = fetch) {
 
   return {
     version: meta.version,
+    builtAt: meta.builtAt || null,
     svgFiles: meta.svgFiles || [],
     poiTotal: meta.poiTotal,
     maps,

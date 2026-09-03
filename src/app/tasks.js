@@ -48,18 +48,27 @@ export async function loadTasks(mapKey, file) {
     return [];
   }
   try {
-    const list = await fetch('./' + file).then((r) => {
+    // cache: 'no-cache' の理由は src/mapdb/index.js のコメントを参照
+    const list = await fetch('./' + file, { cache: 'no-cache' }).then((r) => {
       if (!r.ok) throw new Error(String(r.status));
       return r.json();
     });
     const out = Array.isArray(list) ? list : [];
     cache.set(mapKey, out);
     return out;
-  } catch {
-    // タスクが読めなくても測位は動く。空で続行する。
-    cache.set(mapKey, []);
-    return [];
+  } catch (err) {
+    // タスクが読めなくても測位は動く。ただし「無い」のか「読めなかった」のかは
+    // 区別できるようにする。黙って空にすると原因が追えない。
+    const failed = [];
+    failed.failed = String(err && err.message ? err.message : err);
+    cache.set(mapKey, failed);
+    return failed;
   }
+}
+
+/** キャッシュを捨てて読み直せるようにする（診断用）。 */
+export function clearTaskCache() {
+  cache.clear();
 }
 
 /**

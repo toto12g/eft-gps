@@ -163,9 +163,14 @@ function renderTaskOptions() {
   sel.innerHTML = '';
   const none = document.createElement('option');
   none.value = '';
+  const m = state.db.byKey.get(state.selectedKey);
   none.textContent = state.tasks.length
     ? `— 選択なし（${shown.length} / ${state.tasks.length} 件）—`
-    : '— このマップに目標地点のあるタスクはありません —';
+    : state.tasks.failed
+      ? `— タスクデータを読めませんでした（${state.tasks.failed}）—`
+      : m && m.taskFile === undefined
+        ? '— データが古いようです。Ctrl+Shift+R で再読み込みしてください —'
+        : '— このマップに目標地点のあるタスクはありません —';
   sel.appendChild(none);
   for (const t of shown) {
     const opt = document.createElement('option');
@@ -574,6 +579,9 @@ async function selectMap(key) {
   $('map-missing').hidden = ok;
   $('attrib').textContent =
     m.tarkovDev && m.tarkovDev.svgPath ? 'map: the-hideout/tarkov-dev-svg-maps (CC BY-NC-SA 4.0)' : '';
+  $('build-stamp').textContent = state.db.builtAt
+    ? `データ ${state.db.builtAt}`
+    : 'データの版が不明（古い可能性があります）';
 
   const floors = $('floor-select');
   floors.innerHTML = '';
