@@ -519,8 +519,12 @@ body.side-collapsed #btn-side-show { display: block; }
   <div>
     <label for="task-select">タスクの目標地点</label>
     <input type="search" id="task-filter" placeholder="タスク名・トレーダー・目標で絞り込む" autocomplete="off">
+    <label class="lm-toggle" id="task-hide-wrap" style="margin-top:6px">
+      <input type="checkbox" id="task-hide-done"><span>終わったタスクを隠す</span>
+    </label>
     <select id="task-select" style="margin-top:8px"></select>
     <div class="btn-row">
+      <button type="button" id="btn-task-done" hidden>終わった</button>
       <button type="button" id="btn-task-clear">解除</button>
       <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
     </div>

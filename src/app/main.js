@@ -92,6 +92,9 @@ const state = {
   layers: new Set(safeParse('eft-gps.layers', DEFAULT_ENABLED)),
   tasks: [],
   taskFilter: '',
+  /** 終わったタスクの id。ゲーム側からは読めないので手で印を付けてもらう */
+  doneTasks: new Set(safeParse('eft-gps.doneTasks', [])),
+  hideDone: localStorage.getItem('eft-gps.hideDone') === '1',
   activeTask: null,
   activePinId: localStorage.getItem('eft-gps.activePin') || null,
   placing: false,
@@ -340,6 +343,41 @@ function setupTasks() {
   });
   $('task-select').addEventListener('change', (ev) => selectTask(ev.target.value));
   $('btn-task-clear').addEventListener('click', () => selectTask(''));
+
+  // 進行状況。ゲームからは読めないので手で印を付けてもらう。
+  // 一覧は 243 件あり、終わったものが混ざったままだと探すのが辛い。
+  const hide = $('task-hide-done');
+  hide.checked = state.hideDone;
+  hide.addEventListener('change', () => {
+    state.hideDone = hide.checked;
+    try {
+      localStorage.setItem('eft-gps.hideDone', state.hideDone ? '1' : '0');
+    } catch { /* 保存できなくても動作には影響しない */ }
+    renderTaskOptions();
+  });
+  $('btn-task-done').addEventListener('click', () => {
+    const t = state.activeTask;
+    if (!t) return;
+    if (state.doneTasks.has(t.id)) state.doneTasks.delete(t.id);
+    else state.doneTasks.add(t.id);
+    try {
+      localStorage.setItem('eft-gps.doneTasks', JSON.stringify([...state.doneTasks]));
+    } catch { /* 保存できなくても動作には影響しない */ }
+    // 隠す設定なら、印を付けた時点で一覧から消えるので選択も外す
+    if (state.hideDone && state.doneTasks.has(t.id)) selectTask('');
+    else { renderTaskOptions(); syncTaskDoneButton(); }
+  });
+}
+
+/** 「終わった」ボタンの見た目を、いま選んでいるタスクに合わせる。 */
+function syncTaskDoneButton() {
+  const btn = $('btn-task-done');
+  const t = state.activeTask;
+  btn.hidden = !t;
+  if (!t) return;
+  const done = state.doneTasks.has(t.id);
+  btn.textContent = done ? '終わった印を外す' : '終わった';
+  btn.setAttribute('aria-pressed', String(done));
 }
 
 /** そのマップのタスクを読み込んで一覧を作る。 */
@@ -368,13 +406,24 @@ async function loadMapTasks(mapData) {
 
 function renderTaskOptions() {
   const sel = $('task-select');
-  const shown = filterTasks(state.tasks, state.taskFilter);
+  let shown = filterTasks(state.tasks, state.taskFilter);
+  // 選択中のものは、隠す設定でも一覧に残す（消えると選択が外れて驚く）
+  const activeId = state.activeTask ? state.activeTask.id : null;
+  const hidden = state.hideDone
+    ? shown.filter((t) => state.doneTasks.has(t.id) && t.id !== activeId).length
+    : 0;
+  if (state.hideDone) {
+    shown = shown.filter((t) => !state.doneTasks.has(t.id) || t.id === activeId);
+  }
   sel.innerHTML = '';
   const none = document.createElement('option');
   none.value = '';
   const m = state.db.byKey.get(state.selectedKey);
+  const doneHere = state.tasks.filter((t) => state.doneTasks.has(t.id)).length;
   none.textContent = state.tasks.length
-    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件、〈任意〉は全マップ共通）—`
+    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件`
+      + (doneHere ? `、終了 ${doneHere}${hidden ? ' を非表示' : ''}` : '')
+      + `、〈任意〉は全マップ共通）—`
     : state.tasks.failed
       ? `— タスクデータを読めませんでした（${state.tasks.failed}）—`
       : m && m.taskFile === undefined
@@ -384,7 +433,7 @@ function renderTaskOptions() {
   for (const t of shown) {
     const opt = document.createElement('option');
     opt.value = t.id;
-    opt.textContent = taskLabel(t);
+    opt.textContent = (state.doneTasks.has(t.id) ? '✓ ' : '') + taskLabel(t);
     sel.appendChild(opt);
   }
   sel.disabled = !state.tasks.length;
@@ -398,7 +447,11 @@ function selectTask(id) {
     if (state.wantTaskId) localStorage.setItem('eft-gps.task', state.wantTaskId);
     else localStorage.removeItem('eft-gps.task');
   } catch { /* 保存できなくても動作には影響しない */ }
+  // 隠す設定のときは、選択中だけ一覧に残している。選択が変わると
+  // 「残す対象」も変わるので、そのつど作り直す
+  if (state.hideDone) renderTaskOptions();
   $('task-select').value = id || '';
+  syncTaskDoneButton();
   const wiki = $('task-wiki');
   wiki.hidden = !(state.activeTask && state.activeTask.w);
   if (!wiki.hidden) wiki.href = state.activeTask.w;
