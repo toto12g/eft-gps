@@ -19,6 +19,8 @@ export const FACTION_COLOR = {
   shared: '#ffc848',
 };
 export const FACTION_LABEL = { pmc: 'PMC', scav: 'スカブ', shared: '共通' };
+/** 色だけだと、暗い地図の上の小さな点は色覚特性によっては判別できない。形も変える。 */
+export const FACTION_SHAPE = { pmc: 'circle', scav: 'triangle', shared: 'square' };
 
 /** SVG のピクセル座標をそのまま CRS 単位として使う。 */
 export function makeCRS(L) {
@@ -57,6 +59,8 @@ export class MapView {
     this.routeLayer = null;
     this.taskLayer = null;
     this.landmarkLayer = null;
+    this.northCtl = null;
+    this.hintLayer = null;
     /** 表示する脱出口の陣営 */
     this.factions = new Set(['pmc', 'scav', 'shared']);
 
@@ -92,7 +96,7 @@ export class MapView {
   async setMap(mapData) {
     this.mapData = mapData;
     this.trail = [];
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer']) {
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer', 'hintLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -104,7 +108,10 @@ export class MapView {
     const [vx, vy, vw, vh] = mapData.svgViewBox;
     const bounds = L.latLngBounds([vy, vx], [vy + vh, vx + vw]);
 
-    const svgText = await fetch('./' + mapData.svg).then((r) => r.text());
+    // cache: 'no-cache' の理由は src/mapdb/index.js のコメントを参照。
+    // 付けないと、デプロイ直後の 10 分間だけ古い SVG と新しい affine が
+    // 組み合わさり、「更新したのにズレている」という報告になる。
+    const svgText = await fetch('./' + mapData.svg, { cache: 'no-cache' }).then((r) => r.text());
     const holder = document.createElement('div');
     holder.innerHTML = svgText;
     const svg = holder.querySelector('svg');
@@ -119,6 +126,7 @@ export class MapView {
     this.map.fitBounds(bounds, { padding: [12, 12], animate: false });
 
     this.drawExtracts();
+    this.setNorth(mapData.northDeg);
     return true;
   }
 
@@ -167,14 +175,16 @@ export class MapView {
         icon: L.divIcon({
           className: 'extract-icon',
           html:
-            `<span class="dot" style="--c:${color}"></span>` +
+            `<span class="dot ex-${FACTION_SHAPE[faction] || 'circle'}" style="--c:${color}"></span>` +
+            (e.sw ? `<span class="sw" title="スイッチが要る">⚡</span>` : '') +
             `<span class="label" style="--c:${color}">${escapeHtml(label)}</span>`,
           iconSize: [0, 0],
         }),
         interactive: true,
       }).addTo(this.extractLayer);
       marker.bindTooltip(
-        `${escapeHtml(e.name || '')}<br>${FACTION_LABEL[faction] || faction}<br>` +
+        `${escapeHtml(e.name || '')}<br>${FACTION_LABEL[faction] || faction}` +
+          (e.sw ? '<br><b>スイッチを入れないと使えない</b>' : '') + '<br>' +
           `x ${e.position.x.toFixed(1)} / y ${e.position.y.toFixed(1)} / z ${e.position.z.toFixed(1)}`,
       );
     }
@@ -374,11 +384,19 @@ export class MapView {
               `<span class="lm-label" style="--c:${def.color}">${escapeHtml(text)}</span>`;
 
         const marker = L.marker(latlng, {
-          icon: L.divIcon({ className: `lm-icon lm-kind-${def.id}`, html, iconSize: [0, 0] }),
+          icon: L.divIcon({
+            // 湧きは陣営(item.s)で見た目を変える。数が多いので色分けが要る
+            className: `lm-icon lm-kind-${def.id}${item.s ? ' lm-side-' + item.s : ''}`,
+            html,
+            iconSize: [0, 0],
+          }),
           zIndexOffset: def.id === 'label' ? 100 : 300,
           interactive: def.shape !== 'text',
         }).addTo(group);
-        if (def.shape !== 'text') marker.bindTooltip(`${def.name}: ${escapeHtml(text)}`);
+        // 湧きのように地図上に文字を出さないものは、item.n を吹き出しに回す
+        if (def.shape !== 'text') {
+          marker.bindTooltip(text ? `${def.name}: ${escapeHtml(text)}` : escapeHtml(item.n || def.name));
+        }
         drawn++;
       }
     }
@@ -387,6 +405,49 @@ export class MapView {
       this.landmarkLayer = group.addTo(this.map);
     }
     return drawn;
+  }
+
+  /**
+   * 方位ローズ。北がどちらかを図の右下に出す。
+   * 「方位 77°」と言われても、基準が図に無いと地図と結び付かない。
+   * アフィンに写した「北」の向きを描くので、回転・反転した図でも正しく向く。
+   */
+  setNorth(northDeg) {
+    if (this.northCtl) {
+      this.northCtl.remove();
+      this.northCtl = null;
+    }
+    if (northDeg === null || northDeg === undefined || !this.mapData || !this.mapData.affine) return;
+    const deg = headingToScreenDeg(this.mapData.affine, northDeg);
+    const L = this.L;
+    const Ctl = L.Control.extend({
+      onAdd() {
+        const el = L.DomUtil.create('div', 'north-rose');
+        el.innerHTML = `<span class="needle" style="transform:rotate(${deg}deg)"></span><span class="n">N</span>`;
+        el.title = `北（ワールドの方位 ${northDeg}°）`;
+        return el;
+      },
+    });
+    this.northCtl = new Ctl({ position: 'bottomright' });
+    this.northCtl.addTo(this.map);
+  }
+
+  /**
+   * 「このマップで最も近い POI」を 1 点描く。
+   * マップ違いを疑われたときに、そこに何も無いことを目で確かめられるようにする。
+   */
+  setNearestHint(point) {
+    if (this.hintLayer) {
+      this.hintLayer.remove();
+      this.hintLayer = null;
+    }
+    if (!point || !this.mapData || !this.mapData.affine) return;
+    const L = this.L;
+    this.hintLayer = L.circleMarker(worldToLatLng(this.mapData.affine, point.x, point.z), {
+      radius: 6, color: '#c9776c', weight: 2, dashArray: '3 3', fillOpacity: 0,
+      interactive: true,
+    }).addTo(this.map);
+    this.hintLayer.bindTooltip(`このマップで最も近い既知の地点（${point.d.toFixed(0)} m）`);
   }
 
   /** 指定のワールド座標へ寄る。 */

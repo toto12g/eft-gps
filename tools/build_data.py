@@ -250,6 +250,36 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
             if w.get("position"):
                 bucket(k, "gun").append({"p": pos3(w["position"])})
 
+        for z in ((m.get("artillery") or {}).get("zones")) or []:
+            if not z.get("position"):
+                continue
+            bucket(k, "artillery").append({
+                "n": "砲撃",
+                "p": pos3(z["position"]),
+                "o": [[rnd(v["x"]), rnd(v["z"])] for v in (z.get("outline") or [])],
+            })
+
+        # 湧き位置。3000 点あるので 25m 格子で間引き、陣営ごとにまとめる
+        seen_spawn = set()
+        for sp in m.get("spawns") or []:
+            p = sp.get("position")
+            if not p:
+                continue
+            cats = sp.get("categories") or []
+            if "player" not in cats:
+                continue
+            sides = sp.get("sides") or []
+            side = "pmc" if "pmc" in sides else "scav" if "scav" in sides else "all"
+            cell = (side, round(p["x"] / 25), round(p["z"] / 25))
+            if cell in seen_spawn:
+                continue
+            seen_spawn.add(cell)
+            bucket(k, "spawn").append({
+                "n": {"pmc": "PMC 湧き", "scav": "スカブ湧き"}.get(side, "湧き"),
+                "s": side,
+                "p": pos3(p),
+            })
+
         for b in m.get("bosses") or []:
             mob = mobs.get(b.get("mob")) or {}
             name = tr(mob.get("name") or b.get("mob") or "")
@@ -508,6 +538,9 @@ def collect_points(scene: dict):
     for coll in POI_COLLECTIONS:
         for item in scene.get(coll) or []:
             take(item)
+    # artillery だけは {"zones": [...]} という形をしている
+    for z in ((scene.get("artillery") or {}).get("zones")) or []:
+        take(z)
     return out
 
 
@@ -741,9 +774,13 @@ def build():
             m["name"] = scene.get("name")
             m["raidDuration"] = scene.get("raidDuration")
             m["coordinateToCardinalRotation"] = scene.get("coordinateToCardinalRotation")
+            m["raidDuration"] = scene.get("raidDuration")
             m["extracts"] = [
                 {
                     "name": e.get("name"),
+                    # スイッチを入れないと使えない脱出口。無条件のものと
+                    # 同じ見た目で並ぶと、最寄り脱出口の案内として危険
+                    **({"sw": e["switch"]} if e.get("switch") else {}),
                     # 内部キーも残す。校正ツールの参照 ID に使うため、
                     # 表示名が変わっても対応点が迷子にならない。
                     "key": e.get("id") or e.get("name"),
@@ -837,6 +874,9 @@ def build():
                 "z": [round(min(zs), 2), round(max(zs), 2)],
             },
             "extracts": m.get("extracts", []),
+            "raidDuration": m.get("raidDuration"),
+            # ワールドの +Z が真北から何度ずれているか。方位ローズに使う
+            "northDeg": m.get("coordinateToCardinalRotation"),
             "taskCount": task_counts.get(key, 0),
             "taskFile": f"data/tasks/{key}.json" if task_counts.get(key) else None,
             "landmarkCounts": landmark_counts.get(key) or {},

@@ -11,7 +11,7 @@ import {
   quatToYawDeg, quatToPitchDeg, headingStrength, bearingDeg, angleDiffDeg,
 } from '../geo/index.js';
 import { formatGameTime, tarkovTimeHours } from '../clock/index.js';
-import { loadMapDb } from '../mapdb/index.js';
+import { loadMapDb, nearestPoiPoint } from '../mapdb/index.js';
 import { validateSample, VERDICT, isDrawable, MapTracker } from '../verify/index.js';
 import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
@@ -84,6 +84,8 @@ const state = {
   lastVerdict: null,
   shownAt: null,
   floorLocked: safeParse('eft-gps.floorLocked', false),
+  wantTaskId: localStorage.getItem('eft-gps.task') || null,
+  wantFloor: localStorage.getItem('eft-gps.floor') || null,
   floorIds: [],
   pins: [],
   landmarks: {},
@@ -103,9 +105,12 @@ async function boot() {
   state.db = await loadMapDb('./data/');
   state.view = new MapView(window.L, $('map'));
 
-  // ?map= と ?sample= で初期状態を指定できる (動作確認のスクリーンショット用)
+  // ?map= ?sample= ?layers= で初期状態を指定できる (動作確認のスクリーンショット用)
   const params = new URLSearchParams(location.search);
   if (params.get('map')) state.selectedKey = params.get('map');
+  if (params.get('layers')) {
+    state.layers = new Set(params.get('layers').split(',').filter(Boolean));
+  }
 
   const sel = $('map-select');
   for (const m of state.db.maps) {
@@ -135,6 +140,11 @@ async function boot() {
   });
   $('floor-select').addEventListener('change', (ev) => {
     state.view.setFloor(ev.target.value || null);
+    state.wantFloor = ev.target.value || null;
+    try {
+      if (state.wantFloor) localStorage.setItem('eft-gps.floor', state.wantFloor);
+      else localStorage.removeItem('eft-gps.floor');
+    } catch { /* 保存できなくても動作には影響しない */ }
   });
   const lock = $('floor-lock-input');
   lock.checked = state.floorLocked;
@@ -293,6 +303,8 @@ function landmarkLabel(item, kind) {
   if (kind === 'boss') return bossLabel(item);
   if (kind === 'lock') return item.n || '施錠扉';
   if (kind === 'gun') return '固定武器';
+  // 湧きは 1 マップ 150 点あるので、地図上に文字は出さない（吹き出しだけ）
+  if (kind === 'spawn') return '';
   return item.n || '';
 }
 
@@ -327,6 +339,10 @@ function setupTasks() {
 
 /** そのマップのタスクを読み込んで一覧を作る。 */
 async function loadMapTasks(mapData) {
+  // マップが変わっても、同じタスクがそのマップにもあるなら選択を引き継ぐ。
+  // トランジットで移動したときに、追いかけていた目標地点が
+  // 理由の説明なく消えるのを防ぐ。
+  const prev = state.activeTask;
   state.activeTask = null;
   state.tasks = await loadTasks(mapData.key, mapData.taskFile, state.db.anyTaskFile);
   $('task-filter').value = state.taskFilter = '';
@@ -335,6 +351,14 @@ async function loadMapTasks(mapData) {
   $('task-wiki').hidden = true;
   state.view.setTask(null, state.selectedKey);
   $('task-loadout').innerHTML = '';
+
+  // 引き継ぎ: 直前に選んでいたもの、無ければ保存されていたもの
+  const wantId = (prev && prev.id) || state.wantTaskId;
+  if (wantId && state.tasks.some((t) => t.id === wantId)) {
+    selectTask(wantId);
+  } else if (prev) {
+    setStatus(`「${prev.n}」は ${mapData.key} の目標ではないので選択を外しました`, 'low');
+  }
 }
 
 function renderTaskOptions() {
@@ -364,6 +388,11 @@ function renderTaskOptions() {
 
 function selectTask(id) {
   state.activeTask = id ? state.tasks.find((t) => t.id === id) || null : null;
+  state.wantTaskId = state.activeTask ? state.activeTask.id : null;
+  try {
+    if (state.wantTaskId) localStorage.setItem('eft-gps.task', state.wantTaskId);
+    else localStorage.removeItem('eft-gps.task');
+  } catch { /* 保存できなくても動作には影響しない */ }
   $('task-select').value = id || '';
   const wiki = $('task-wiki');
   wiki.hidden = !(state.activeTask && state.activeTask.w);
@@ -424,6 +453,9 @@ function renderLoadout(doors) {
     row('find', it.kind === 'hand' ? '引渡' : '探す', it.n, '');
   }
   if (weaponSpec) row('weapon', '装備', '使用武器の指定あり', `${weaponSpec} 種`);
+  // 候補が多すぎて 8 件で打ち切ったぶん
+  const more = (state.activeTask.o || []).reduce((n, o) => n + (o.itMore || 0), 0);
+  if (more) row('weapon', 'ほか', `代わりに使えるアイテムが ${more} 種`, 'Wiki 参照');
 }
 
 function renderObjectives() {
@@ -662,7 +694,9 @@ function setupGuide() {
   }
 
   // 初めて来た人には自動で出す。一度閉じたら以後は出さない。
-  if (localStorage.getItem('eft-gps.setupSeen') !== '1') open();
+  // ?nohelp=1 は動作確認のスクリーンショット用。初回案内が地図を覆うのを避ける
+  const skipHelp = new URLSearchParams(location.search).get('nohelp') === '1';
+  if (!skipHelp && localStorage.getItem('eft-gps.setupSeen') !== '1') open();
 }
 
 /* ------------------------------------------------------------------ 監視 */
@@ -802,6 +836,14 @@ async function applySample(sample, fileModifiedMs, live) {
   renderSample(sample, verdict);
 
   const m = state.db.byKey.get(state.selectedKey);
+  // マップ違いのときだけ、選択中のマップで最も近い既知の地点を 1 点描く。
+  // 「そこに何も無い」ことが目で分かれば、比の数字だけより納得できる。
+  // レイド外（ハイドアウト等）では出さない — 毎回出ると単なる雑音になる
+  state.view.setNearestHint(
+    m && m.affine && verdict.verdict === VERDICT.WRONG_MAP
+      ? nearestPoiPoint(m, sample.x, sample.y, sample.z)
+      : null,
+  );
   if (m && m.affine && isDrawable(verdict.verdict)) {
     syncFloor(sample);
     state.shownAt = fileModifiedMs ?? sample.takenAtMs ?? Date.now();
@@ -860,6 +902,11 @@ async function selectMap(key) {
     }
     floors.disabled = ids.length < 2;
     $('floor-lock').hidden = ids.length < 2;
+    // 固定しているなら、保存されていたフロアを復元する
+    if (state.floorLocked && state.wantFloor && ids.includes(state.wantFloor)) {
+      floors.value = state.wantFloor;
+      state.view.setFloor(state.wantFloor);
+    }
   } else {
     floors.disabled = true;
     state.floorIds = [];
@@ -938,7 +985,8 @@ function renderSample(sample, verdict) {
   if (exit) {
     rows.push([
       '最寄り脱出口',
-      `${exit.name}　${exit.dist.toFixed(0)} m　方位 ${exit.bearing.toFixed(0)}°` +
+      `${exit.name}${exit.needsSwitch ? '（要スイッチ）' : ''}　` +
+        `${exit.dist.toFixed(0)} m　方位 ${exit.bearing.toFixed(0)}°` +
         (exit.relative === null ? '' : `（${relativeText(exit.relative)}）`),
     ]);
   }
@@ -978,6 +1026,7 @@ function nearestExit(map, sample, yaw) {
         name: String(e.name || '').replace(/^EXFIL[_ ]?/i, ''),
         dist,
         bearing,
+        needsSwitch: !!e.sw,
         relative: yaw === null ? null : angleDiffDeg(bearing, yaw),
       };
     }

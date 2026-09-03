@@ -109,6 +109,25 @@ export function nearestPoiDistance(map, x, y, z) {
 }
 
 /**
+ * そのマップで最も近い POI の座標を返す（診断用）。
+ * 「そこに何も無い」ことを目で見せるのに使う。
+ * @returns {{x:number,y:number,z:number,d:number}|null}
+ */
+export function nearestPoiPoint(map, x, y, z) {
+  const p = map.poi;
+  const X = x * 10, Y = y * 10, Z = z * 10;
+  let best = Infinity;
+  let bi = -1;
+  for (let i = 0; i < p.length; i += 3) {
+    const dx = p[i] - X, dy = p[i + 1] - Y, dz = p[i + 2] - Z;
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d < best) { best = d; bi = i; }
+  }
+  if (bi < 0) return null;
+  return { x: p[bi] / 10, y: p[bi + 1] / 10, z: p[bi + 2] / 10, d: Math.sqrt(best) / 10 };
+}
+
+/**
  * 全マップを最近傍距離の昇順で返す。
  * @param {{maps:MapEntry[]}} db
  * @returns {{key:string, d:number}[]}

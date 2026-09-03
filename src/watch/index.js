@@ -44,6 +44,8 @@ export class ScreenshotWatcher {
     this.status = isSupported() ? WATCH.IDLE : WATCH.UNSUPPORTED;
     this.timer = null;
     this.polling = false;
+    /** この時刻までは間隔を詰める（新着が続いている間） */
+    this.busyUntil = 0;
     /**
      * 前回のポーリングで見えていたファイル名。差分が新着になる。
      * 「初めて見た時刻」を持って古いものを捨てる方式にすると、まだフォルダに
@@ -136,13 +138,29 @@ export class ScreenshotWatcher {
       return this.fail(err);
     }
 
-    this.timer = setInterval(() => this.poll(), this.intervalMs);
+    this.schedule();
     this.setStatus(WATCH.WATCHING, this.dir.name);
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * 次のポーリングを予約する。
+   * スクリーンショットを消さない人のフォルダは数千件まで育つので、
+   * 件数に応じて間隔を伸ばす。新着が続く間は 1 秒に戻す。
+   */
+  schedule() {
+    if (this.timer) clearTimeout(this.timer);
+    const n = this.known.size;
+    const base = n > 3000 ? 4000 : n > 1000 ? 2000 : this.intervalMs;
+    const wait = this.busyUntil && Date.now() < this.busyUntil ? this.intervalMs : base;
+    this.timer = setTimeout(async () => {
+      await this.poll();
+      if (this.dir) this.schedule();
+    }, wait);
   }
 
   /** フォルダ内の画像ファイル名の集合。名前だけを読む。 */
@@ -173,6 +191,8 @@ export class ScreenshotWatcher {
         if (!this.known.has(name)) fresh.push(name);
       }
       this.known = current; // 消えたファイルもここで自動的に落ちる
+      // 新着が続く間は間隔を詰める
+      if (fresh.length) this.busyUntil = Date.now() + 30000;
       // 同時に複数出てきたら名前順 (= 時刻順) に流す
       fresh.sort();
       for (const name of fresh) {

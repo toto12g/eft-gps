@@ -18,6 +18,8 @@ const cache = new Map();
 export const LAYERS = [
   { id: 'label',   name: '地名',     color: '#d7dedc', shape: 'text',    hint: 'Big Red, Dorms, Sawmill など' },
   { id: 'hazard',  name: '危険地帯', color: '#e5484d', shape: 'area',    hint: '地雷原・狙撃ゾーン' },
+  { id: 'artillery', name: '砲撃',   color: '#ff8a3d', shape: 'area',    hint: '砲撃が落ちる範囲' },
+  { id: 'spawn',   name: '湧き',     color: '#8fd6ff', shape: 'circle',  hint: 'プレイヤーの湧き位置（25m 間引き）' },
   { id: 'lock',    name: '施錠扉',   color: '#9aa7b8', shape: 'square',  hint: '必要な鍵の名前つき' },
   { id: 'switch',  name: 'スイッチ', color: '#ffe066', shape: 'diamond', hint: '電源・扉の操作盤' },
   { id: 'transit', name: '乗り換え', color: '#4ea3ff', shape: 'triangle', hint: '他マップへの移動口' },
@@ -49,10 +51,9 @@ export async function loadLandmarks(mapKey, file) {
     cache.set(mapKey, out);
     return out;
   } catch (err) {
-    // 読めなくても測位は動く。理由は残す
+    // 失敗はキャッシュしない（tasks.js と同じ理由）。次に開いたら取り直す
     const failed = {};
     Object.defineProperty(failed, 'failed', { value: String(err && err.message ? err.message : err) });
-    cache.set(mapKey, failed);
     return failed;
   }
 }

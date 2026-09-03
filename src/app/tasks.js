@@ -76,11 +76,10 @@ export async function loadTasks(mapKey, file, anyFile = null) {
     cache.set(mapKey, out);
     return out;
   } catch (err) {
-    // タスクが読めなくても測位は動く。ただし「無い」のか「読めなかった」のかは
-    // 区別できるようにする。黙って空にすると原因が追えない。
+    // 失敗はキャッシュしない。一瞬の通信断で「以後ずっと読めない」状態に
+    // 固まってしまう。次に同じマップを開いたときに取り直す。
     const failed = [];
     failed.failed = String(err && err.message ? err.message : err);
-    cache.set(mapKey, failed);
     return failed;
   }
 }

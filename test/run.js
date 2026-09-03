@@ -1236,6 +1236,89 @@ await check('目標の種類に日本語表示がある', () => {
 
 /* --------------------------------------------------------------------- T23 */
 
+/* --------------------------------------------------------------------- T24 */
+
+group('T24 追加レイヤと方位（検収 B-3 / B-4 / B-5 / E-3）');
+
+await check('スイッチが要る脱出口に印が付いている', () => {
+  // 印が無いと「最寄りの脱出口」として無条件のものと同じ顔で案内されてしまう。
+  // 上流が 147 件中 10 件に switch を持たせている
+  const marked = [];
+  for (const m of db.maps) {
+    for (const e of m.extracts || []) if (e.sw) marked.push(`${m.key}/${e.name}`);
+  }
+  truthy(marked.length >= 8, `印の付いた脱出口が少なすぎる: ${marked.length}`);
+  const customs = db.byKey.get('customs').extracts.find((e) => e.name === 'ZB-013');
+  truthy(customs && customs.sw, 'customs の ZB-013 に印が無い');
+  return `${marked.length} 件（例: ${marked.slice(0, 3).join(', ')}）`;
+});
+
+await check('湧きと砲撃のレイヤが用意されている', async () => {
+  const ids = LAYERS.map((l) => l.id);
+  truthy(ids.includes('spawn'), '湧きレイヤが無い');
+  truthy(ids.includes('artillery'), '砲撃レイヤが無い');
+  truthy(!DEFAULT_ENABLED.includes('spawn'), '湧きが既定でオンだと地図が埋まる');
+  const lm = await loadLandmarks('customs', '../' + db.byKey.get('customs').landmarkFile);
+  truthy((lm.spawn || []).length >= 50, `customs の湧きが少ない: ${(lm.spawn || []).length}`);
+  truthy((lm.artillery || []).length >= 1, 'customs の砲撃ゾーンが無い');
+  return `customs 湧き ${lm.spawn.length} / 砲撃 ${lm.artillery.length}`;
+});
+
+await check('湧きが 25m 格子で間引かれ、陣営が残っている', async () => {
+  const lm = await loadLandmarks('woods', '../' + db.byKey.get('woods').landmarkFile);
+  const sides = new Set((lm.spawn || []).map((s) => s.s));
+  truthy(sides.size >= 2, `陣営が 1 種類しかない: ${[...sides].join(',')}`);
+  // 格子の切り方を JS 側で再現すると、Python の round との差で
+  // 境界の 1 点だけ食い違う。守りたいのは「重複が消えて数が減っている」こと
+  const exact = new Set((lm.spawn || []).map((s) => `${s.s}/${s.p[0]}/${s.p[2]}`));
+  eq(exact.size, lm.spawn.length, '完全に同じ位置の点が残っている');
+  truthy(lm.spawn.length < 260, `間引きが効いていない: ${lm.spawn.length} 点（生データは 327）`);
+  return `woods ${lm.spawn.length} 点 / 陣営 ${[...sides].join(', ')}`;
+});
+
+await check('砲撃ゾーンが面として描ける形をしている', async () => {
+  const lm = await loadLandmarks('reserve', '../' + db.byKey.get('reserve').landmarkFile);
+  for (const z of lm.artillery || []) {
+    truthy(Array.isArray(z.p) && z.p.length === 3, '中心座標が無い');
+    truthy((z.o || []).length >= 3, `輪郭が ${(z.o || []).length} 点しかなく面にならない`);
+  }
+  return `reserve ${lm.artillery.length} ゾーン / 輪郭 ${lm.artillery[0].o.length} 点`;
+});
+
+await check('方位ローズが「北が上」の地図で真上を向く', () => {
+  // northDeg は「ワールドの方位いくつが北か」。アフィンに通した向きが
+  // 画面上どちらかを出す。tarkov.dev の地図はほぼ北が上に描かれている
+  const off = [];
+  for (const m of db.maps) {
+    if (!m.affine || m.northDeg === null || m.northDeg === undefined) continue;
+    const deg = headingToScreenDeg(m.affine, m.northDeg);
+    const d = Math.min(deg, 360 - deg); // 画面上(0°)からのずれ
+    if (d > 1) off.push(`${m.key} ${d.toFixed(1)}°`);
+  }
+  // reserve だけは地図自体が 195° 回して描かれているので 15° 傾く
+  eq(off.length, 1, `北が上でない地図が増えた: ${off.join(', ')}`);
+  truthy(off[0].startsWith('reserve'), `想定外の傾き: ${off[0]}`);
+  return `1 枚を除き真上（例外: ${off[0]}）`;
+});
+
+await check('レイド時間と方位の基準が mapdb に出ている', () => {
+  // 取得だけして捨てていた 2 つ。方位ローズが northDeg に依存する
+  const withNorth = db.maps.filter((m) => typeof m.northDeg === 'number');
+  const withDur = db.maps.filter((m) => typeof m.raidDuration === 'number');
+  truthy(withNorth.length >= 11, `northDeg を持つマップが少ない: ${withNorth.length}`);
+  truthy(withDur.length >= 11, `raidDuration を持つマップが少ない: ${withDur.length}`);
+  eq(db.byKey.get('customs').raidDuration, 35, 'customs のレイド時間');
+  return `northDeg ${withNorth.length} 枚 / raidDuration ${withDur.length} 枚`;
+});
+
+await check('代替アイテムの打ち切り件数(itMore)が残っている', () => {
+  // 8 件で切っているので「ほかにもある」ことを言えないと嘘になる
+  let cut = 0;
+  for (const t of customsTasks) for (const o of t.o || []) if (o.itMore) cut += o.itMore;
+  truthy(cut > 0, 'customs のタスクに打ち切りが 1 件も無い');
+  return `customs だけで ${cut} 種が打ち切られている`;
+});
+
 group('T23 配信物の欠落と内容の回帰（検収 F-2 / G-3）');
 
 await check('index.html から辿れる ES モジュールが全部プリキャッシュにある', async () => {

@@ -130,11 +130,39 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 .chip[data-f="scav"]:has(:checked)   { color: #ff7a5c; border-color: #ff7a5c66; }
 .chip[data-f="shared"]:has(:checked) { color: #ffc848; border-color: #ffc84866; }
 
-/* 脱出口 — 小さすぎて見えないという指摘を受けて拡大した */
+/* 脱出口 — 小さすぎて見えないという指摘を受けて拡大した。
+   色だけだと色覚特性によっては判別できないので、陣営で形も変える */
 .extract-icon .dot {
   position: absolute; left: -7px; top: -7px; width: 14px; height: 14px;
-  border-radius: 50%; border: 3px solid var(--c); background: rgba(10,12,13,.75);
+  border: 3px solid var(--c); background: rgba(10,12,13,.75);
   box-shadow: 0 0 0 1px rgba(10,12,13,.9), 0 0 6px rgba(0,0,0,.7);
+}
+.extract-icon .ex-circle { border-radius: 50%; }
+.extract-icon .ex-square { border-radius: 2px; }
+.extract-icon .ex-triangle { border-radius: 2px; transform: rotate(45deg); }
+.extract-icon .sw {
+  position: absolute; left: 4px; top: -14px; font-size: 11px; line-height: 1;
+  color: #ffe066; text-shadow: 0 0 3px #0a0c0d, 0 0 3px #0a0c0d;
+}
+
+.lm-kind-spawn .lm-mark { width: 6px; height: 6px; opacity: .75; }
+.lm-side-pmc .lm-mark { --c: #ff9db0; }
+.lm-side-scav .lm-mark { --c: #8fd6ff; }
+
+/* 方位ローズ */
+.north-rose {
+  position: relative; width: 42px; height: 42px; border-radius: 50%;
+  background: rgba(14,17,18,.82); border: 1px solid var(--rule);
+  box-shadow: 0 0 8px rgba(0,0,0,.6);
+}
+.north-rose .needle {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -14px 0 0 -5px;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-bottom: 16px solid var(--accent); transform-origin: 50% 87.5%;
+}
+.north-rose .n {
+  position: absolute; left: 0; right: 0; bottom: 3px; text-align: center;
+  font: 700 10px/1 var(--mono); color: var(--accent);
 }
 .extract-icon .label {
   position: absolute; left: 12px; top: -9px; white-space: nowrap;
@@ -529,6 +557,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
     <p class="safety" id="build-stamp"></p>
     <p class="safety">
       非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
+      地図素材のライセンス上、<b>ゲーム画面に重ねての使用は禁止</b>されています。
     </p>
   </div>
 </div>

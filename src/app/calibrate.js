@@ -126,7 +126,7 @@ async function setSvg(file) {
     renderRefs();
     return;
   }
-  const text = await fetch('./maps/' + file).then((r) => r.text());
+  const text = await fetch('./maps/' + file, { cache: 'no-cache' }).then((r) => r.text());
   host.innerHTML = text;
   const svg = host.querySelector('svg');
   const vb = (svg.getAttribute('viewBox') || '0 0 100 100').split(/[\s,]+/).map(Number);
