@@ -17,6 +17,7 @@ import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
 import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
 import { loadTasks, filterTasks, taskLabel, objectiveGeometry, OBJECTIVE_TYPE } from './tasks.js';
+import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from './landmarks.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -48,6 +49,8 @@ const state = {
   lastSample: null,
   lastModified: null,
   pins: [],
+  landmarks: {},
+  layers: new Set(JSON.parse(localStorage.getItem('eft-gps.layers') || 'null') || DEFAULT_ENABLED),
   tasks: [],
   taskFilter: '',
   activeTask: null,
@@ -114,6 +117,7 @@ async function boot() {
   }
   state.view.factions = new Set(state.factions);
 
+  setupLayers();
   setupWatcher();
   setupGuide();
   setupPins();
@@ -133,6 +137,60 @@ async function boot() {
     handleInput(preset);
   }
   document.title = `EFT 測位クライアント — ${state.selectedKey}`;
+}
+
+/* ------------------------------------------------ 名前の付いた地点のレイヤ */
+
+function setupLayers() {
+  const box = $('layer-filter');
+  box.innerHTML = '';
+  for (const def of LAYERS) {
+    const label = document.createElement('label');
+    label.className = 'chip';
+    label.dataset.layer = def.id;
+    label.style.setProperty('--lc', def.color);
+    label.title = def.hint;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = def.id;
+    input.checked = state.layers.has(def.id);
+    input.addEventListener('change', () => {
+      if (input.checked) state.layers.add(def.id);
+      else state.layers.delete(def.id);
+      localStorage.setItem('eft-gps.layers', JSON.stringify([...state.layers]));
+      renderLandmarks();
+    });
+    const span = document.createElement('span');
+    span.textContent = def.name;
+    label.append(input, span);
+    box.appendChild(label);
+  }
+}
+
+function landmarkLabel(item, kind) {
+  if (kind === 'hazard') return hazardLabel(item);
+  if (kind === 'boss') return bossLabel(item);
+  if (kind === 'lock') return item.n || '施錠扉';
+  if (kind === 'gun') return '固定武器';
+  return item.n || '';
+}
+
+function renderLandmarks() {
+  const drawn = state.view.setLandmarks(state.landmarks, state.layers, LAYERS, landmarkLabel);
+
+  // どの種類が何件あるか出す。0 件なら「このマップには無い」と分かる
+  const counts = LAYERS.filter((d) => state.layers.has(d.id))
+    .map((d) => `${d.name} ${(state.landmarks[d.id] || []).length}`)
+    .join(' / ');
+  $('layer-hint').textContent = state.landmarks.failed
+    ? `地点データを読めませんでした（${state.landmarks.failed}）`
+    : counts || 'チェックを入れると地名や危険地帯を出せます。';
+
+  for (const label of $('layer-filter').querySelectorAll('.chip')) {
+    const n = (state.landmarks[label.dataset.layer] || []).length;
+    label.classList.toggle('empty', n === 0);
+  }
+  return drawn;
 }
 
 /* -------------------------------------------------------------- タスク */
@@ -603,6 +661,8 @@ async function selectMap(key) {
   state.pins = loadPins(key);
   if (!state.pins.some((p) => p.id === state.activePinId)) state.activePinId = null;
   renderPins();
+  state.landmarks = await loadLandmarks(key, m.landmarkFile);
+  renderLandmarks();
   await loadMapTasks(m);
 
   $('map-info').textContent = ok

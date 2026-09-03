@@ -41,6 +41,10 @@ SRC_LANG = "https://json.tarkov.dev/regular/maps_{lang}"
 SRC_TASKS = "https://json.tarkov.dev/regular/tasks"
 SRC_TASKS_LANG = "https://json.tarkov.dev/regular/tasks_{lang}"
 SRC_TRADERS = "https://json.tarkov.dev/regular/traders"
+# 施錠扉が要求する鍵の名前を引くためだけに使う。16MB あるがビルド時のみで、
+# 出力に載るのは実際に参照される 200 件弱の名前だけ。--no-keys で省ける。
+SRC_ITEMS = "https://json.tarkov.dev/regular/items"
+SRC_ITEMS_LANG = "https://json.tarkov.dev/regular/items_{lang}"
 SRC_SVG = "https://raw.githubusercontent.com/the-hideout/tarkov-dev-svg-maps/main/"
 
 # 校正ツール (calibrate.html) が出した手動校正。解析的な初期値より優先する。
@@ -132,6 +136,147 @@ def apply_translations(payload: dict, primary: dict, fallback: dict) -> int:
                 container[key] = new
                 replaced += 1
     return replaced
+
+
+def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
+                    ja: dict, en: dict, mobs: dict, want_keys: bool):
+    """脱出口以外の「名前の付いた地点」をマップごとに切り出す。
+
+    地名ラベルは tarkov-dev の maps.json（人が付けた地名。Big Red, Dorms, Sawmill …）、
+    それ以外は tarkov.dev の API から取る。全部で 140KB ほどなので、
+    タスクと同じくマップ単位に分けて遅延読み込みする。
+    """
+    def tr(s):
+        return ja.get(s) or en.get(s) or s
+
+    def rnd(v):
+        return round(float(v), 1)
+
+    def pos3(p):
+        return [rnd(p["x"]), rnd(p["y"]), rnd(p["z"])]
+
+    # 鍵の名前。参照される鍵だけ拾う
+    key_name = {}
+    if want_keys:
+        wanted = set()
+        for m in api_maps.values():
+            for lock in m.get("locks") or []:
+                if lock.get("key"):
+                    wanted.add(lock["key"])
+        if wanted:
+            try:
+                items = json.loads(fetch(SRC_ITEMS, "items.json", refresh))
+                ija = json.loads(fetch(SRC_ITEMS_LANG.format(lang="ja"), "items_ja.json", refresh))["data"]
+                ien = json.loads(fetch(SRC_ITEMS_LANG.format(lang="en"), "items_en.json", refresh))["data"]
+                pool = items.get("data", items)
+                pool = pool.get("items", pool)
+                for iid in wanted:
+                    rec = pool.get(iid) if isinstance(pool, dict) else None
+                    if not rec:
+                        continue
+                    # 略称 ("USEC", "Cabin") だと何の鍵か分からないので正式名称を使う
+                    raw_name = rec.get("name") or rec.get("shortName") or ""
+                    key_name[iid] = ija.get(raw_name) or ien.get(raw_name) or raw_name
+                print(f"  鍵の名前を解決: {len(key_name)}/{len(wanted)} 件", file=sys.stderr)
+            except Exception as exc:
+                print(f"  鍵の名前は取得できませんでした（{exc}）。扉だけ出します", file=sys.stderr)
+
+    out = {}
+
+    def bucket(map_key, kind):
+        return out.setdefault(map_key, {}).setdefault(kind, [])
+
+    for m in api_maps.values():
+        k = SCENE_ALIASES.get(m["normalizedName"], m["normalizedName"])
+
+        for t in m.get("transits") or []:
+            if t.get("position"):
+                bucket(k, "transit").append({"n": tr(t.get("description") or ""), "p": pos3(t["position"])})
+
+        for sw in m.get("switches") or []:
+            if sw.get("position"):
+                bucket(k, "switch").append({"n": tr(sw.get("name") or ""), "p": pos3(sw["position"])})
+
+        for b in m.get("btrStops") or []:
+            if b.get("x") is not None:
+                bucket(k, "btr").append({"n": tr(b.get("name") or ""),
+                                         "p": [rnd(b["x"]), rnd(b["y"]), rnd(b["z"])]})
+
+        for h in m.get("hazards") or []:
+            if not h.get("position"):
+                continue
+            bucket(k, "hazard").append({
+                "n": tr(h.get("name") or ""),
+                "t": h.get("hazardType") or "",
+                "p": pos3(h["position"]),
+                "o": [[rnd(v["x"]), rnd(v["z"])] for v in (h.get("outline") or [])],
+            })
+
+        for lock in m.get("locks") or []:
+            if not lock.get("position"):
+                continue
+            rec = {"t": lock.get("lockType") or "door", "p": pos3(lock["position"])}
+            name = key_name.get(lock.get("key"))
+            if name:
+                rec["n"] = name
+            if lock.get("needsPower"):
+                rec["pw"] = 1
+            bucket(k, "lock").append(rec)
+
+        for w in m.get("stationaryWeapons") or []:
+            if w.get("position"):
+                bucket(k, "gun").append({"p": pos3(w["position"])})
+
+        for b in m.get("bosses") or []:
+            mob = mobs.get(b.get("mob")) or {}
+            name = tr(mob.get("name") or b.get("mob") or "")
+            # 1 つのゾーンに湧き位置が何十個も入っている。全部出すと地図が
+            # 点で埋まるので、20m 格子で間引いてゾーンあたり 3 点までにする。
+            seen = set()
+            for sl in b.get("spawnLocations") or []:
+                kept = 0
+                for p in sl.get("positions") or []:
+                    cell = (name, round(p["x"] / 20), round(p["z"] / 20))
+                    if cell in seen:
+                        continue
+                    seen.add(cell)
+                    bucket(k, "boss").append({
+                        "n": name, "z": tr(sl.get("name") or ""),
+                        "c": sl.get("chance"), "p": pos3(p),
+                    })
+                    kept += 1
+                    if kept >= 3:
+                        break
+
+    # 地名ラベル（tarkov-dev の手書きデータ。position は [x, z] か [x, z, y]）
+    for key, sub in interactive.items():
+        for lab in sub.get("labels") or []:
+            p = lab.get("position") or []
+            if len(p) < 2:
+                continue
+            bucket(key, "label").append({
+                "n": lab.get("text") or "",
+                "p": [rnd(p[0]), rnd(p[2]) if len(p) > 2 else 0.0, rnd(p[1])],
+                "r": lab.get("rotation") or 0,
+                "s": lab.get("size") or 0,
+            })
+
+    out_dir = DATA / "landmarks"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for stale in out_dir.glob("*.json"):
+        stale.unlink()
+
+    counts = {}
+    for key, groups in out.items():
+        (out_dir / f"{key}.json").write_text(
+            json.dumps(groups, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+        )
+        counts[key] = {kind: len(v) for kind, v in groups.items()}
+
+    total_items = sum(sum(c.values()) for c in counts.values())
+    total_bytes = sum((out_dir / f"{k}.json").stat().st_size for k in counts)
+    print(f"  地点 {total_items} 件 / {len(counts)} ファイル {total_bytes:,} バイト", file=sys.stderr)
+    return counts
 
 
 def build_tasks(refresh: bool, id_to_key: dict):
@@ -396,6 +541,8 @@ def quantize(points):
 def build():
     ap = argparse.ArgumentParser()
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--no-keys", action="store_true",
+                    help="施錠扉の鍵名を解決しない（items の 16MB を取りに行かない）")
     args = ap.parse_args()
 
     print("sources", file=sys.stderr)
@@ -426,6 +573,10 @@ def build():
         name = scene["normalizedName"]
         id_to_key[scene["id"]] = SCENE_ALIASES.get(name, name)
     task_counts = build_tasks(args.refresh, id_to_key)
+    landmark_counts = build_landmarks(
+        args.refresh, api["maps"], interactive, lang_ja, lang_en,
+        api.get("mobs") or {}, not args.no_keys,
+    )
 
     # シーンを統合先ごとにまとめる
     merged: dict[str, dict] = {}
@@ -539,6 +690,8 @@ def build():
             "extracts": m.get("extracts", []),
             "taskCount": task_counts.get(key, 0),
             "taskFile": f"data/tasks/{key}.json" if task_counts.get(key) else None,
+            "landmarkCounts": landmark_counts.get(key) or {},
+            "landmarkFile": f"data/landmarks/{key}.json" if landmark_counts.get(key) else None,
             "affine": affine,
             "rms": (ov or {}).get("rms"),
             "calib": calib,

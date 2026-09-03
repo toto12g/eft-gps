@@ -84,12 +84,42 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 .leaflet-bar a:hover { background: var(--panel-2); color: var(--accent); }
 
 .chips { display: flex; gap: 6px; }
+.chips.wrap { flex-wrap: wrap; }
+.chips.wrap .chip { flex: 0 0 auto; padding: 5px 8px; }
+
+/* 名前の付いた地点 */
+.lm-icon > span { position: absolute; }
+.lm-text {
+  left: 0; top: -8px; transform: translateX(-50%); white-space: nowrap;
+  font: 600 12px/1.4 var(--mono); color: var(--c); opacity: .92; letter-spacing: .04em;
+  text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
+}
+.lm-mark { left: -5px; top: -5px; width: 10px; height: 10px;
+           background: var(--c); border: 1.5px solid #0a0c0d; }
+.lm-circle { border-radius: 50%; }
+.lm-diamond { transform: rotate(45deg); }
+.lm-triangle { background: transparent; width: 0; height: 0; border: 0;
+               border-left: 6px solid transparent; border-right: 6px solid transparent;
+               border-bottom: 10px solid var(--c);
+               filter: drop-shadow(0 0 1.5px #0a0c0d); }
+.lm-label { left: 9px; top: -7px; white-space: nowrap;
+            font: 11px/1.4 var(--mono); color: var(--c);
+            text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d; }
+/* 数が多いものはラベルを出さない（拡大したときだけ見せる） */
+.leaflet-container .lm-kind-lock .lm-label,
+.leaflet-container .lm-kind-hazard .lm-label,
+.leaflet-container .lm-kind-gun .lm-label { display: none; }
+.leaflet-container.zoomed-in .lm-kind-lock .lm-label,
+.leaflet-container.zoomed-in .lm-kind-hazard .lm-label,
+.leaflet-container.zoomed-in .lm-kind-gun .lm-label { display: block; }
 .chip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
         margin: 0; padding: 6px 4px; border: 1px solid var(--rule); border-radius: 2px;
         background: var(--panel-2); cursor: pointer;
         font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: none;
         color: var(--muted); }
 .chip input { width: auto; margin: 0; accent-color: currentColor; }
+.chips.wrap .chip:has(:checked) { color: var(--lc); border-color: color-mix(in srgb, var(--lc) 45%, transparent); }
+.chips.wrap .chip.empty { opacity: .38; }
 .chip[data-f="pmc"]:has(:checked)    { color: #6fd66f; border-color: #6fd66f66; }
 .chip[data-f="scav"]:has(:checked)   { color: #ff7a5c; border-color: #ff7a5c66; }
 .chip[data-f="shared"]:has(:checked) { color: #ffc848; border-color: #ffc84866; }
@@ -256,6 +286,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
               border-color: var(--accent); background: #2a2416; }
 .setup-pick[disabled] { opacity: .5; }
 #btn-setup { margin-top: 8px; }
+/* 拡大したときだけ細かいラベルを出す */
 </style>
 </head>
 <body>
@@ -360,6 +391,11 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
         <label class="chip" data-f="scav"><input type="checkbox" value="scav" checked><span>スカブ</span></label>
         <label class="chip" data-f="shared"><input type="checkbox" value="shared" checked><span>共通</span></label>
       </div>
+    </div>
+    <div class="field">
+      <label>地図に出すもの</label>
+      <div id="layer-filter" class="chips wrap"></div>
+      <div id="layer-hint" class="hint-line"></div>
     </div>
     <div id="map-info" style="margin-top:8px"></div>
     <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>

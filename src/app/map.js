@@ -56,6 +56,7 @@ export class MapView {
     this.pinLayer = null;
     this.routeLayer = null;
     this.taskLayer = null;
+    this.landmarkLayer = null;
     /** 表示する脱出口の陣営 */
     this.factions = new Set(['pmc', 'scav', 'shared']);
 
@@ -65,6 +66,13 @@ export class MapView {
     this.onMapClick = () => {};
     /** @type {(id:string) => void} */
     this.onPinClick = () => {};
+
+    // 拡大したときだけ、数の多い地点のラベルを出す（CSS 側で制御）
+    const syncZoomClass = () => {
+      this.map.getContainer().classList.toggle('zoomed-in', this.map.getZoom() >= 1);
+    };
+    this.map.on('zoomend', syncZoomClass);
+    syncZoomClass();
 
     this.map.on('click', (ev) => {
       if (!this.placing || !this.mapData || !this.mapData.affine) return;
@@ -84,7 +92,7 @@ export class MapView {
   async setMap(mapData) {
     this.mapData = mapData;
     this.trail = [];
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer']) {
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -311,6 +319,58 @@ export class MapView {
         }).addTo(this.taskLayer);
       }
     });
+  }
+
+  /**
+   * 名前の付いた地点を描く。
+   * @param {Object} data 種類 → 配列
+   * @param {Set<string>} enabled 表示する種類
+   * @param {Object[]} layers LAYERS の定義
+   * @param {(item:Object, kind:string) => string} labelOf 表示名
+   */
+  setLandmarks(data, enabled, layers, labelOf) {
+    const L = this.L;
+    if (this.landmarkLayer) this.landmarkLayer.remove();
+    this.landmarkLayer = null;
+    if (!this.mapData || !this.mapData.affine || !data) return;
+
+    const aff = this.mapData.affine;
+    const group = L.layerGroup();
+    let drawn = 0;
+
+    for (const def of layers) {
+      if (!enabled.has(def.id)) continue;
+      for (const item of data[def.id] || []) {
+        const text = labelOf(item, def.id);
+        const latlng = worldToLatLng(aff, item.p[0], item.p[2]);
+
+        // 範囲を持つもの（危険地帯）は面でも描く
+        if ((item.o || []).length >= 3) {
+          L.polygon(item.o.map((v) => worldToLatLng(aff, v[0], v[1])), {
+            color: def.color, weight: 1.5, fillOpacity: 0.18, interactive: false,
+          }).addTo(group);
+        }
+
+        const html =
+          def.shape === 'text'
+            ? `<span class="lm-text" style="--c:${def.color}">${escapeHtml(text)}</span>`
+            : `<span class="lm-mark lm-${def.shape}" style="--c:${def.color}"></span>` +
+              `<span class="lm-label" style="--c:${def.color}">${escapeHtml(text)}</span>`;
+
+        const marker = L.marker(latlng, {
+          icon: L.divIcon({ className: `lm-icon lm-kind-${def.id}`, html, iconSize: [0, 0] }),
+          zIndexOffset: def.id === 'label' ? 100 : 300,
+          interactive: def.shape !== 'text',
+        }).addTo(group);
+        if (def.shape !== 'text') marker.bindTooltip(`${def.name}: ${escapeHtml(text)}`);
+        drawn++;
+      }
+    }
+
+    if (drawn) {
+      this.landmarkLayer = group.addTo(this.map);
+    }
+    return drawn;
   }
 
   /** 指定のワールド座標へ寄る。 */

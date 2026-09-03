@@ -34,6 +34,7 @@ import { validateSample, VERDICT, MapTracker } from '../src/verify/index.js';
 import { ScreenshotWatcher, isSupported } from '../src/watch/index.js';
 import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '../src/app/pins.js';
 import { loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints, OBJECTIVE_TYPE } from '../src/app/tasks.js';
+import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
 
@@ -894,6 +895,116 @@ await check('監視できないブラウザを検出できる', () => {
   const supported = isSupported();
   truthy(typeof supported === 'boolean', '真偽値を返す');
   return `showDirectoryPicker: ${supported ? 'あり' : 'なし'}（このブラウザ）`;
+});
+
+/* --------------------------------------------------------------------- T17 */
+
+group('T17 名前の付いた地点');
+
+const customsLm = await loadLandmarks('customs', '../data/landmarks/customs.json');
+
+await check('マップごとの地点ファイルが読める', async () => {
+  const withFile = db.maps.filter((m) => m.landmarkFile);
+  truthy(withFile.length >= 10, `landmarkFile を持つマップが少ない: ${withFile.length}`);
+  let total = 0;
+  for (const m of withFile) {
+    const data = await loadLandmarks(m.key, '../' + m.landmarkFile);
+    truthy(!data.failed, `${m.key} の読み込みに失敗: ${data.failed}`);
+    for (const [kind, list] of Object.entries(m.landmarkCounts || {})) {
+      eq((data[kind] || []).length, list, `${m.key}/${kind} の件数が mapdb と食い違う`);
+      total += list;
+    }
+  }
+  return `${withFile.length} マップ / のべ ${total} 地点`;
+});
+
+await check('地名が実際の呼び名になっている', () => {
+  const names = (customsLm.label || []).map((l) => l.n);
+  truthy(names.length >= 20, `Customs の地名が少ない: ${names.length}`);
+  for (const known of ['Big Red', 'Dorms', 'New Gas', 'Old Gas', 'Fortress']) {
+    truthy(names.includes(known), `「${known}」が無い`);
+  }
+  return `${names.length} 件: ${names.slice(0, 5).join(' / ')} …`;
+});
+
+await check('地点の座標がそのマップの範囲に入っている', () => {
+  const b = db.byKey.get('customs').bbox;
+  const margin = 250;
+  let n = 0;
+  const out = [];
+  for (const def of LAYERS) {
+    for (const it of customsLm[def.id] || []) {
+      n++;
+      const [x, , z] = it.p;
+      if (x < b.x[0] - margin || x > b.x[1] + margin || z < b.z[0] - margin || z > b.z[1] + margin) {
+        out.push(`${def.id}:${it.n || ''} (${x},${z})`);
+      }
+    }
+  }
+  truthy(n > 50, `検査した地点が少ない: ${n}`);
+  eq(out.length, 0, `範囲外: ${out.slice(0, 3).join(' / ')}`);
+  return `${n} 地点すべてが Customs の範囲内`;
+});
+
+await check('施錠扉に鍵の名前が入っている', () => {
+  const locks = customsLm.lock || [];
+  truthy(locks.length > 10, `施錠扉が少ない: ${locks.length}`);
+  const named = locks.filter((l) => l.n);
+  truthy(named.length / locks.length > 0.5, `鍵名の付いた割合が低い: ${named.length}/${locks.length}`);
+  // 略称ではなく正式名称であること（"USEC" ではなく "USECの隠し倉庫の鍵"）
+  const longEnough = named.filter((l) => l.n.length >= 4);
+  truthy(longEnough.length === named.length, `略称のままのものがある: ${named.find((l) => l.n.length < 4)?.n}`);
+  return `${named.length}/${locks.length} 件に鍵名（例: ${named[0].n}）`;
+});
+
+await check('危険地帯とボスの表示名が読める形になる', () => {
+  const hz = customsLm.hazard || [];
+  truthy(hz.length > 0, '危険地帯が無い');
+  const kinds = new Set(hz.map(hazardLabel));
+  for (const k of kinds) truthy(k && k.length <= 6, `危険地帯の表示が長すぎる: ${k}`);
+  const boss = customsLm.boss || [];
+  truthy(boss.length > 0, 'ボス湧きが無い');
+  const label = bossLabel(boss[0]);
+  truthy(label && label.length > 0, 'ボス名が空');
+  return `危険 ${[...kinds].join('・')} / ボス例「${label}」`;
+});
+
+await check('ボス湧きが間引かれている', () => {
+  // 間引かないと 1 マップで数百点になり、地図が埋まる
+  for (const m of db.maps) {
+    const n = (m.landmarkCounts || {}).boss || 0;
+    truthy(n <= 90, `${m.key} のボス湧きが多すぎる: ${n}`);
+  }
+  const total = db.maps.reduce((s, m) => s + ((m.landmarkCounts || {}).boss || 0), 0);
+  return `全マップ合計 ${total} 点`;
+});
+
+await check('レイヤ定義が一貫している', () => {
+  const ids = new Set();
+  for (const def of LAYERS) {
+    truthy(def.id && def.name && def.color && def.shape, `定義が欠けている: ${JSON.stringify(def)}`);
+    truthy(!ids.has(def.id), `id が重複: ${def.id}`);
+    ids.add(def.id);
+    truthy(/^#[0-9a-f]{6}$/i.test(def.color), `色の形式が不正: ${def.color}`);
+  }
+  for (const id of DEFAULT_ENABLED) truthy(ids.has(id), `既定で有効な ${id} が定義に無い`);
+  // 既存の用途と色がぶつかっていないこと
+  const taken = ['#6fd66f', '#ff7a5c', '#ffc848', '#b48cff', '#22e0ff'];
+  const clash = LAYERS.filter((d) => taken.includes(d.color.toLowerCase()));
+  eq(clash.length, 0, `脱出口・ピン・タスク・現在地と同じ色: ${clash.map((d) => d.id).join(', ')}`);
+  return `${LAYERS.length} 種類 / 既定で有効: ${DEFAULT_ENABLED.join(', ')}`;
+});
+
+await check('データにあるすべての種類が UI で出せる', () => {
+  const known = new Set(LAYERS.map((d) => d.id));
+  const missing = new Set();
+  for (const m of db.maps) {
+    for (const kind of Object.keys(m.landmarkCounts || {})) {
+      if (!known.has(kind)) missing.add(kind);
+    }
+  }
+  eq(missing.size, 0, `UI に無い種類: ${[...missing].join(', ')}`);
+  return `データ側の種類がすべて LAYERS に定義済み`;
 });
 
 /* --------------------------------------------------------------------- T16 */
