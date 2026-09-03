@@ -57,20 +57,43 @@ export const DEFAULT_THRESHOLDS = {
 };
 
 /**
- * 直近のサンプルを覚えて、マップを累積で判定する。
- * 1 枚ごとの判定より圧倒的に安定する (上のコメント参照)。
+ * そのレイドのサンプルを覚えて、マップを累積で判定する。
+ *
+ * ★ 窓でスライドさせてはいけない。
+ *   Woods のレイド 22 枚で実際に起きた不具合: 1 枚目は 2位/1位 = 154 という
+ *   決定的な証拠だったのに、直近 12 枚の窓がそこを通り過ぎると、
+ *   ロードの少ない区間で Interchange が 1 位になり、地図が勝手に移った。
+ *   レイド開始から全部を貯めれば、実測 3 レイド 38 枚すべてで誤りは 0 になる。
+ *
+ * ★ 距離はそのまま比べてはいけない。
+ *   POI の密度がマップごとに 7 倍以上違う（Woods 771 点/km² に対し
+ *   Reserve 5814 点/km²）。同じ 20m でも意味がまったく違うので、
+ *   そのマップの「点の間隔」で割ってから比べる。
+ *
+ * ★ それでもマップの移動には追随する。
+ *   トランジットで移った場合に備え、直近の数枚だけで見ても別マップが
+ *   決定的なら、貯めたものを捨てて数え直す。
  */
 export class MapTracker {
   /**
-   * @param {{windowSize?:number, gapResetMs?:number}} [opts]
+   * @param {{maxSamples?:number, gapResetMs?:number, switchWindow?:number, switchRatio?:number, bboxMargin?:number}} [opts]
    */
   constructor(opts = {}) {
-    this.windowSize = opts.windowSize ?? 12;
+    /** 1 レイドで貯める上限。これ以上は古いものから捨てる */
+    this.maxSamples = opts.maxSamples ?? 400;
     /** これ以上間が空いたら別のレイドとみなして忘れる */
     this.gapResetMs = opts.gapResetMs ?? 10 * 60 * 1000;
-    /** @type {{at:number, ranking:{key:string,d:number}[]}[]} */
+    /** 移動を判定するのに見る直近の枚数 */
+    this.switchWindow = opts.switchWindow ?? 4;
+    /** 移動と認めるのに必要な、直近だけで見たときの比 */
+    this.switchRatio = opts.switchRatio ?? 6;
+    /** bbox 判定の余裕 (m) */
+    this.bboxMargin = opts.bboxMargin ?? 40;
+
+    /** @type {{at:number, x:number, y:number, z:number, ranking:{key:string,d:number}[]}[]} */
     this.window = [];
     this.lastAt = null;
+    this.db = null;
   }
 
   reset() {
@@ -83,30 +106,89 @@ export class MapTracker {
   }
 
   /**
-   * サンプルを 1 枚足す。時刻が大きく飛んでいたら窓を捨てる。
+   * サンプルを 1 枚足す。
    * @param {{x:number,y:number,z:number}} sample
    * @param {{maps:Object[]}} db
    * @param {number|null} [atMs]
    */
   add(sample, db, atMs = null) {
     const at = atMs ?? Date.now();
+    this.db = db;
+
+    // 時間が飛んだ = 別のレイド
     if (this.lastAt !== null && Math.abs(at - this.lastAt) > this.gapResetMs) this.reset();
     this.lastAt = at;
-    this.window.push({ at, ranking: rankMaps(db, sample.x, sample.y, sample.z) });
-    if (this.window.length > this.windowSize) this.window.shift();
+
+    const entry = {
+      at,
+      x: sample.x,
+      y: sample.y,
+      z: sample.z,
+      ranking: rankMaps(db, sample.x, sample.y, sample.z),
+    };
+    this.window.push(entry);
+    if (this.window.length > this.maxSamples) this.window.shift();
+
+    // トランジットなどでマップが変わったなら、貯めたものを捨てる
+    if (this.window.length > this.switchWindow) {
+      const recent = this.window.slice(-this.switchWindow);
+      const now = this.rank(this.window);
+      const late = this.rank(recent);
+      if (
+        late.length > 1 &&
+        late[0].key !== now[0].key &&
+        late[0].score > 0 &&
+        late[1].score / late[0].score >= this.switchRatio
+      ) {
+        this.window = recent;
+      }
+    }
     return this.scores();
   }
 
-  /** マップごとの平均最近傍距離を昇順で返す。 */
-  scores() {
+  /** そのマップの「点の間隔」。密度の違いを吸収するのに使う。 */
+  spacingOf(map) {
+    const b = map.bbox;
+    const area = Math.max(1, (b.x[1] - b.x[0]) * (b.z[1] - b.z[0]));
+    return Math.sqrt(area / Math.max(1, map.poiCount));
+  }
+
+  /** 与えたサンプル群を、そのマップらしさの順に並べる。 */
+  rank(entries) {
+    if (!this.db || entries.length === 0) return [];
+
+    // 軌跡全体を収められないマップは候補から外す。
+    // 短い窓では効かないが、レイドが進むほど強く効く。
+    const fits = this.db.maps.filter((m) => {
+      const b = m.bbox;
+      const g = this.bboxMargin;
+      return entries.every(
+        (e) =>
+          e.x >= b.x[0] - g && e.x <= b.x[1] + g &&
+          e.z >= b.z[0] - g && e.z <= b.z[1] + g &&
+          e.y >= b.y[0] - g && e.y <= b.y[1] + g,
+      );
+    });
+    // 1 つも残らないなら足切りしない（誤って正解を消さないため）
+    const candidates = fits.length ? fits : this.db.maps;
+
     const sum = new Map();
-    for (const entry of this.window) {
-      for (const r of entry.ranking) sum.set(r.key, (sum.get(r.key) || 0) + r.d);
+    for (const e of entries) {
+      for (const r of e.ranking) sum.set(r.key, (sum.get(r.key) || 0) + r.d);
     }
-    const n = this.window.length || 1;
-    return [...sum]
-      .map(([key, s]) => ({ key, mean: s / n }))
-      .sort((a, b) => a.mean - b.mean);
+    const out = [];
+    for (const m of candidates) {
+      const total = sum.get(m.key);
+      if (total === undefined) continue;
+      const mean = total / entries.length;
+      out.push({ key: m.key, mean, score: mean / this.spacingOf(m) });
+    }
+    return out.sort((a, b) => a.score - b.score);
+  }
+
+  /** マップごとの成績を昇順で返す。 */
+  scores() {
+    return this.rank(this.window);
   }
 
   /**
@@ -114,10 +196,9 @@ export class MapTracker {
    * @returns {{best:string, mean:number, second:string|null, ratio:number, n:number}|null}
    */
   consensus() {
-    if (this.window.length === 0) return null;
     const s = this.scores();
     if (s.length === 0) return null;
-    const ratio = s.length > 1 && s[0].mean > 0 ? s[1].mean / s[0].mean : Infinity;
+    const ratio = s.length > 1 && s[0].score > 0 ? s[1].score / s[0].score : Infinity;
     return {
       best: s[0].key,
       mean: s[0].mean,

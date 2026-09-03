@@ -42,7 +42,7 @@ const state = {
   db: null,
   view: null,
   watcher: null,
-  tracker: new MapTracker({ windowSize: 12 }),
+  tracker: new MapTracker(),
   factions: new Set(JSON.parse(localStorage.getItem('eft-gps.factions') || '["pmc","scav","shared"]')),
   selectedKey: localStorage.getItem('eft-gps.map') || 'customs',
   // 既定 ON。発火条件は d1 < 5m かつ 2位/1位 > 5 で、実測マージンは 30 倍ある。
