@@ -91,6 +91,15 @@ export class MapTracker {
     this.bboxMargin = opts.bboxMargin ?? 40;
     /** bbox に収まっている必要があるサンプルの割合 */
     this.bboxFitRatio = opts.bboxFitRatio ?? 0.95;
+    /**
+     * レイド外（ハイドアウト・メニュー）を続けて何枚見たら、
+     * レイドが終わったとみなすか。
+     */
+    this.outOfRaidToEnd = opts.outOfRaidToEnd ?? 2;
+    /** レイド外を連続で見た枚数 */
+    this.outOfRaidRun = 0;
+    /** 直前の add で別レイドと判断した理由（表示に使う） */
+    this.brokeAt = null;
 
     /** @type {{at:number, x:number, y:number, z:number, ranking:{key:string,d:number}[]}[]} */
     this.window = [];
@@ -101,6 +110,32 @@ export class MapTracker {
   reset() {
     this.window = [];
     this.lastAt = null;
+    this.brokeAt = null;
+    this.outOfRaidRun = 0;
+  }
+
+  /**
+   * レイド外（ハイドアウト・メニュー）のサンプルを見たことを伝える。
+   *
+   * 続けて何枚か見たら、レイドは終わったとみなして累積を捨てる。
+   * 1 枚で切らないのは、レイド中でも POI から離れた開けた場所では
+   * 「どのマップからも等距離」に見えることがあるため。
+   *
+   * 速さでレイドの切れ目を見つける案は、実測して捨てた。実レイド 3 本
+   * 54 枚での最大移動速度は 4.6 m/s（276m / 60s）で人の速さの範囲だが、
+   * レイドを続けて回るときの間隔（待機 + 読み込みで数分）では
+   * 「大きく飛んだ」ようには見えない。速さでは切れ目が出ない。
+   * なお同じマップを続けて回るぶんには累積しても答えは変わらないので、
+   * 実害が出るのはマップが変わるときだけで、そこは移動判定が拾う。
+   */
+  noteOutOfRaid() {
+    this.outOfRaidRun += 1;
+    if (this.outOfRaidRun >= this.outOfRaidToEnd) {
+      this.reset();
+      this.brokeAt = 'out-of-raid';
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -128,8 +163,14 @@ export class MapTracker {
     this.db = db;
 
     // 時間が飛んだ = 別のレイド
-    if (this.lastAt !== null && Math.abs(at - this.lastAt) > this.gapResetMs) this.reset();
+    this.brokeAt = null;
+    if (this.lastAt !== null && Math.abs(at - this.lastAt) > this.gapResetMs) {
+      this.reset();
+      this.brokeAt = 'gap';
+    }
+
     this.lastAt = at;
+    this.outOfRaidRun = 0;
 
     const entry = {
       at,

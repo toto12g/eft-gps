@@ -538,6 +538,7 @@ body.side-collapsed #btn-side-show { display: block; }
       </button>
       <button type="button" id="btn-pins-clear">すべて消す</button>
     </div>
+    <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
     <div class="pin-tools">
       <button type="button" id="btn-measure" class="pin-toggle" aria-pressed="false"
               title="地図を 2 回クリックすると、その 2 点間の距離が出ます">
@@ -546,7 +547,10 @@ body.side-collapsed #btn-side-show { display: block; }
       </button>
       <output id="measure-out" class="hint-line"></output>
     </div>
-    <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
+    <div class="pin-tools">
+      <button type="button" id="btn-export">レイドの記録を書き出す</button>
+    </div>
+    <div id="export-hint" class="hint-line">受け取ったファイル名と判定を JSON で保存します。不具合の報告に添えてください。</div>
     <div id="pins"></div>
   </div>
 

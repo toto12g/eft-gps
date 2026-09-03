@@ -1239,6 +1239,41 @@ await check('目標の種類に日本語表示がある', () => {
 /* --------------------------------------------------------------------- T24 */
 
 group('T24 追加レイヤと方位（検収 B-3 / B-4 / B-5 / E-3）');
+await check('レイド外が続くと累積を捨てる（検収 D-3）', () => {
+  // 前のレイドの軌跡を次のレイドに持ち越さない。
+  // 1 枚では切らない（レイド中でも開けた場所は「等距離」に見えるため）
+  const t = new MapTracker();
+  WOODS_RAID.slice(0, 6).forEach((f, i) => t.add(parseScreenshotName(f), db, 1788000000000 + i * 20000));
+  const before = t.count;
+  eq(t.noteOutOfRaid(), false, '1 枚で切ってはいけない');
+  eq(t.count, before, '1 枚目で捨ててしまった');
+  eq(t.noteOutOfRaid(), true, '2 枚続いたら切る');
+  eq(t.count, 0, '累積が残っている');
+  eq(t.brokeAt, 'out-of-raid', '理由が残らない');
+  // レイド中の 1 枚を受けたら数え直す
+  t.add(parseScreenshotName(WOODS_RAID[0]), db, 1788000200000);
+  eq(t.noteOutOfRaid(), false, 'レイド中を挟んだら数え直すべき');
+  return `${before} 枚 → レイド外 2 枚で 0 枚`;
+});
+
+await check('実レイドの移動速度は人の範囲に収まる（速度判定を採らない根拠）', () => {
+  // レイドの切れ目を「人が出せない速さ」で見つける案は、この実測で捨てた。
+  // 最大でも 4.6 m/s しか出ておらず、レイドを続けて回るときの間隔
+  // （待機と読み込みで数分）では、そもそも速く見えない。
+  let worst = 0;
+  for (const raid of [WOODS_RAID, CUSTOMS_RAID, INTERCHANGE_RAID]) {
+    const pts = raid.map((f) => parseScreenshotName(f));
+    for (let i = 1; i < pts.length; i++) {
+      const dt = (pts[i].takenAtMs - pts[i - 1].takenAtMs) / 1000;
+      if (dt <= 0) continue; // ファイル名の時刻は分単位。同じ分は速度が出せない
+      const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      worst = Math.max(worst, d / dt);
+    }
+  }
+  truthy(worst < 8, `人の速さを超えている: ${worst.toFixed(1)} m/s`);
+  return `実レイド 3 本の最大 ${worst.toFixed(1)} m/s`;
+});
+
 await check('印字する方位が方位ローズと同じ基準になっている', () => {
   // ワールドの +Z は北ではない。Customs は 180° ずれている。
   // 図に北の針を出した以上、数字も真北基準でないと読めない。

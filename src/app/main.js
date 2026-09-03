@@ -98,6 +98,8 @@ const state = {
   measuring: false,
   received: 0,
   skipped: 0,
+  /** 書き出し用の記録。1 レイド分だけ持つ（増え続けないよう上限つき） */
+  log: [],
 };
 
 /* ------------------------------------------------------------------ 起動 */
@@ -182,6 +184,7 @@ async function boot() {
   setupGuide();
   setupPins();
   setupSidebar();
+  setupExport();
   setupTasks();
 
   await selectMap(state.selectedKey);
@@ -507,6 +510,43 @@ function renderObjectives() {
     if (here) row.addEventListener('click', () => focusObjective(i));
     else row.disabled = !placeless;
     box.appendChild(row);
+  });
+}
+
+/* --------------------------------------------------------- レイドの記録の書き出し */
+
+/**
+ * 受け取ったサンプルと判定を JSON で保存する。
+ *
+ * 「Woods なのに Interchange に飛ぶ」のような報告は、ファイル名さえあれば
+ * そのまま再現できる。手で貼ってもらうのは現実的でないので、まとめて出す。
+ * 出るのはファイル名・座標・判定だけで、画像そのものは扱わない。
+ */
+function setupExport() {
+  $('btn-export').addEventListener('click', () => {
+    if (!state.log.length) {
+      setStatus('まだ記録がありません。スクリーンショットを 1 枚受け取ってから押してください', 'low');
+      return;
+    }
+    const payload = {
+      tool: 'eft-gps',
+      builtAt: state.db.builtAt,
+      exportedAt: new Date().toISOString(),
+      map: state.selectedKey,
+      trackerCount: state.tracker.count,
+      consensus: state.tracker.consensus(),
+      samples: state.log,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `eft-gps-${state.selectedKey}-${stamp}.json`;
+    a.click();
+    // revoke が早すぎるとダウンロードが始まらないブラウザがある
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    setStatus(`${state.log.length} 枚ぶんの記録を書き出しました`, 'ok');
   });
 }
 
@@ -901,11 +941,36 @@ async function applySample(sample, fileModifiedMs, live) {
     // レイド外の 1 枚を累積に残すと、原点付近の座標が bbox 足切りを狂わせ、
     // 正解のマップが候補から消える。判定が出た時点で取り消す。
     state.tracker.undoLast();
+    // 続けてレイド外を見たら、レイドが終わったとみなして累積を捨てる。
+    // 次のレイドに前のレイドの軌跡を持ち越さない。
+    if (state.tracker.noteOutOfRaid()) {
+      state.view.clearTrail();
+      setStatus('レイド外の画面が続いたので、これまでの軌跡を消しました', 'low');
+    }
     if (live) {
       state.skipped++;
       $('watch-count').textContent = `${state.received} 枚受信 / ${state.skipped} 枚除外`;
     }
   }
+
+  // 書き出し用に残す。ファイル名そのものが一次情報なので、
+  // 判定と並べて出せれば不具合の報告がそのまま再現データになる
+  state.log.push({
+    file: sample.filename || null,
+    x: sample.x, y: sample.y, z: sample.z,
+    q: sample.hasRotation ? sample.q : null,
+    gameTime: sample.gameTime,
+    takenAtMs: sample.takenAtMs,
+    fileModifiedMs: fileModifiedMs ?? null,
+    map: state.selectedKey,
+    verdict: verdict.verdict,
+    reason: verdict.reason || null,
+    best: verdict.best ?? null,
+    d1: verdict.d1 ?? null,
+    ratio: verdict.ratio ?? null,
+    suggest: verdict.suggest ?? null,
+  });
+  if (state.log.length > 600) state.log.shift();
 
   state.lastVerdict = verdict;
   renderSample(sample, verdict);
