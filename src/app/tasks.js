@@ -33,6 +33,9 @@ export const OBJECTIVE_TYPE = {
   traderStanding: '信頼度',
   taskStatus: '前提',
   playerLevel: 'レベル',
+  sellItem: '売却',
+  globalVariable: '進行状況',
+  dialogue: '会話',
 };
 
 /**
@@ -41,19 +44,35 @@ export const OBJECTIVE_TYPE = {
  * @param {string|null} file mapdb の taskFile。無ければ空配列
  * @returns {Promise<Object[]>}
  */
-export async function loadTasks(mapKey, file) {
+async function fetchList(file) {
+  // cache: 'no-cache' の理由は src/mapdb/index.js のコメントを参照
+  const list = await fetch('./' + file, { cache: 'no-cache' }).then((r) => {
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  });
+  return Array.isArray(list) ? list : [];
+}
+
+/**
+ * @param {string} mapKey
+ * @param {string|null} file mapdb の taskFile
+ * @param {string|null} [anyFile] マップを問わないタスクのファイル
+ */
+export async function loadTasks(mapKey, file, anyFile = null) {
   if (cache.has(mapKey)) return cache.get(mapKey);
-  if (!file) {
+  if (!file && !anyFile) {
     cache.set(mapKey, []);
     return [];
   }
   try {
-    // cache: 'no-cache' の理由は src/mapdb/index.js のコメントを参照
-    const list = await fetch('./' + file, { cache: 'no-cache' }).then((r) => {
-      if (!r.ok) throw new Error(String(r.status));
-      return r.json();
-    });
-    const out = Array.isArray(list) ? list : [];
+    // マップ固有のものと、マップを問わないものを合わせて 1 つの一覧にする。
+    // 「任意のマップ」のタスクを全マップのファイルに複製すると重複するので、
+    // 別ファイルにして読み込み時に混ぜている。
+    const [own, any] = await Promise.all([
+      file ? fetchList(file) : Promise.resolve([]),
+      anyFile ? fetchList(anyFile) : Promise.resolve([]),
+    ]);
+    const out = [...own, ...any];
     cache.set(mapKey, out);
     return out;
   } catch (err) {
@@ -121,31 +140,58 @@ export function taskKeyDoors(task, landmarks) {
   }));
 }
 
-/** そのタスクで持っていくものを 1 つの配列にまとめる。 */
+/** その目標が、このマップで意味を持つか。 */
+export function objectiveApplies(objective, mapKey) {
+  const hasPlace = (objective.z || []).length || (objective.l || []).length;
+  if (!hasPlace) return true; // 場所を持たない目標はどのマップでも意味がある
+  const g = objectiveGeometry(objective, mapKey);
+  return g.zones.length > 0 || g.spots.length > 0;
+}
+
+/**
+ * そのタスクで持っていくもの／探すものをまとめる。
+ *
+ * クエストアイテムは items ではなく questItem に入っているので、別に拾う。
+ * ここを見落としていると、222 目標ぶんが持ち物にまったく出てこない。
+ */
 export function taskLoadout(task, mapKey) {
   const bring = [];
+  const find = [];
   let weaponSpec = 0;
+
   for (const o of task.o || []) {
-    const g = objectiveGeometry(o, mapKey);
-    // 別マップの目標の持ち物は出さない（そのマップには要らない）
-    const here = g.zones.length > 0 || g.spots.length > 0 || !(o.z || o.l);
-    if (!here) continue;
+    if (!objectiveApplies(o, mapKey)) continue;
     if (o.mk) bring.push({ ...o.mk, kind: 'marker' });
     for (const it of o.it || []) bring.push({ ...it, kind: o.t === 'giveItem' ? 'give' : 'plant' });
+    if (o.qi) {
+      // 持ち込む(plant) / 探す(find) / 引き渡す(give) で意味が違う
+      if (o.t === 'plantQuestItem') bring.push({ ...o.qi, kind: 'plant', quest: 1 });
+      else find.push({ ...o.qi, kind: o.t === 'giveQuestItem' ? 'hand' : 'find' });
+    }
     if (o.wp) weaponSpec = Math.max(weaponSpec, o.wp);
   }
-  // 同じものが複数の目標に出てきたらまとめる
-  const merged = new Map();
-  for (const b of bring) {
-    const prev = merged.get(b.i);
-    if (prev) prev.c = (prev.c || 1) + (b.c || 1);
-    else merged.set(b.i, { ...b });
-  }
-  return { bring: [...merged.values()], weaponSpec };
+
+  const dedupe = (list) => {
+    const merged = new Map();
+    for (const b of list) {
+      const prev = merged.get(b.i);
+      if (prev) prev.c = (prev.c || 1) + (b.c || 1);
+      else merged.set(b.i, { ...b });
+    }
+    return [...merged.values()];
+  };
+  const bringIds = new Set(bring.map((b) => b.i));
+  return {
+    bring: dedupe(bring),
+    // 持ち込むものと重複する場合は「探す」側から落とす
+    find: dedupe(find).filter((f) => !bringIds.has(f.i)),
+    weaponSpec,
+  };
 }
 
 /** 一覧に出すラベル。 */
 export function taskLabel(task) {
   const lv = task.lv ? ` Lv${task.lv}` : '';
-  return `[${task.tr}${lv}] ${task.n}${task.kap ? ' ★' : ''}`;
+  const any = task.any ? '〈任意〉' : '';
+  return `${any}[${task.tr}${lv}] ${task.n}${task.kap ? ' ★' : ''}`;
 }

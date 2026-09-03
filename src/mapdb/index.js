@@ -55,11 +55,15 @@ export async function loadMapDb(baseUrl = './data/', fetchImpl = fetch) {
     poi: all.subarray(m.poiOffset * 3, (m.poiOffset + m.poiCount) * 3),
   }));
 
+  // ファイルの中身をそのまま通す。項目を 1 つずつ書き写していたころ、
+  // svgFiles と anyTaskFile を書き忘れて UI が空になる事故を 2 回起こした。
+  // 新しい項目を足しても自動的に利用側へ届くようにしておく。
   return {
-    version: meta.version,
+    ...meta,
     builtAt: meta.builtAt || null,
     svgFiles: meta.svgFiles || [],
-    poiTotal: meta.poiTotal,
+    anyTaskFile: meta.anyTaskFile || null,
+    anyTaskCount: meta.anyTaskCount || 0,
     maps,
     byKey: new Map(maps.map((m) => [m.key, m])),
   };

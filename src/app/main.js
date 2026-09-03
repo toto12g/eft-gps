@@ -17,7 +17,8 @@ import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
 import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
 import {
-  loadTasks, filterTasks, taskLabel, objectiveGeometry, taskKeyDoors, taskLoadout, OBJECTIVE_TYPE,
+  loadTasks, filterTasks, taskLabel, objectiveGeometry, objectiveApplies,
+  taskKeyDoors, taskLoadout, OBJECTIVE_TYPE,
 } from './tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from './landmarks.js';
 
@@ -209,7 +210,7 @@ function setupTasks() {
 /** そのマップのタスクを読み込んで一覧を作る。 */
 async function loadMapTasks(mapData) {
   state.activeTask = null;
-  state.tasks = await loadTasks(mapData.key, mapData.taskFile);
+  state.tasks = await loadTasks(mapData.key, mapData.taskFile, state.db.anyTaskFile);
   $('task-filter').value = state.taskFilter = '';
   renderTaskOptions();
   renderObjectives();
@@ -226,7 +227,7 @@ function renderTaskOptions() {
   none.value = '';
   const m = state.db.byKey.get(state.selectedKey);
   none.textContent = state.tasks.length
-    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件）—`
+    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件、〈任意〉は全マップ共通）—`
     : state.tasks.failed
       ? `— タスクデータを読めませんでした（${state.tasks.failed}）—`
       : m && m.taskFile === undefined
@@ -270,8 +271,8 @@ function renderLoadout(doors) {
   box.innerHTML = '';
   if (!state.activeTask) return;
 
-  const { bring, weaponSpec } = taskLoadout(state.activeTask, state.selectedKey);
-  if (!doors.length && !bring.length && !weaponSpec) return;
+  const { bring, find, weaponSpec } = taskLoadout(state.activeTask, state.selectedKey);
+  if (!doors.length && !bring.length && !find.length && !weaponSpec) return;
 
   const head = document.createElement('div');
   head.className = 'lo-head';
@@ -300,6 +301,10 @@ function renderLoadout(doors) {
     const fir = it.f ? '<span class="fir">要FiR</span>' : '';
     row(it.kind, label, it.n, `${qty}${qty && fir ? ' ' : ''}${fir}`);
   }
+  for (const it of find) {
+    // 持ち込むのではなく、レイド内で見つける／トレーダーに渡すもの
+    row('find', it.kind === 'hand' ? '引渡' : '探す', it.n, '');
+  }
   if (weaponSpec) row('weapon', '装備', '使用武器の指定あり', `${weaponSpec} 種`);
 }
 
@@ -314,14 +319,18 @@ function renderObjectives() {
   state.activeTask.o.forEach((objective, i) => {
     const g = objectiveGeometry(objective, state.selectedKey);
     const here = g.zones.length > 0 || g.spots.length > 0;
+    // 場所を持たない目標（「スカブを 10 体倒す」など）は「別マップ」ではない
+    const placeless = !(objective.z || []).length && !(objective.l || []).length;
 
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'obj-row' + (here ? '' : ' away');
+    row.className = 'obj-row' + (here || placeless ? '' : ' away');
 
     // 現在地からいちばん近い地点までの距離
     const spotCount = g.zones.length + g.spots.length;
-    let meta = here ? (OBJECTIVE_TYPE[objective.t] || objective.t || '') : '別マップ';
+    let meta = here || placeless
+      ? (OBJECTIVE_TYPE[objective.t] || objective.t || '')
+      : '別マップ';
     if (here && s) {
       const pts = [
         ...g.zones.map((z) => ({ x: z.p[0], z: z.p[2] })),
@@ -344,7 +353,7 @@ function renderObjectives() {
       `${spotCount > 1 ? `<em class="cnt">${spotCount} 箇所</em>` : ''}</span>` +
       `<span class="m">${escapeHtml(meta)}</span>`;
     if (here) row.addEventListener('click', () => focusObjective(i));
-    else row.disabled = true;
+    else row.disabled = !placeless;
     box.appendChild(row);
   });
 }

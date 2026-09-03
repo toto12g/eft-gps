@@ -45,6 +45,10 @@ SRC_TRADERS = "https://json.tarkov.dev/regular/traders"
 # 出力に載るのは実際に参照される 200 件弱の名前だけ。--no-keys で省ける。
 SRC_ITEMS = "https://json.tarkov.dev/regular/items"
 SRC_ITEMS_LANG = "https://json.tarkov.dev/regular/items_{lang}"
+
+# マップを問わないタスク（「スカブを 10 体倒す」など）を入れるファイル名。
+# 全マップのファイルに複製すると重複するので 1 つにまとめ、アプリ側で合成する。
+ANY_MAP = "_any"
 SRC_SVG = "https://raw.githubusercontent.com/the-hideout/tarkov-dev-svg-maps/main/"
 
 # 校正ツール (calibrate.html) が出した手動校正。解析的な初期値より優先する。
@@ -322,6 +326,11 @@ def build_tasks(refresh: bool, id_to_key: dict):
     tasks = payload["data"]["tasks"]
     tasks = list(tasks.values()) if isinstance(tasks, dict) else (tasks or [])
 
+    # クエストアイテム（持ち込む／探す／引き渡す対象）。
+    # これらの目標は items を持たず questItem だけを持つので、
+    # items だけを見ていると持ち物にまったく出てこない。
+    quest_items = payload["data"].get("questItems") or {}
+
     # 持ち物として出すアイテムの名前を引く。
     # usingWeapon は 1 目標に数十丁並ぶので一覧にせず「指定あり」とだけ出す。
     wanted_items = set()
@@ -338,6 +347,10 @@ def build_tasks(refresh: bool, id_to_key: dict):
             ):
                 wanted_items.update(o["items"])
     item_name = load_item_names(refresh, wanted_items)
+
+    def quest_item_rec(qid):
+        rec = quest_items.get(qid) or {}
+        return {"i": qid, "n": rec.get("name") or "クエストアイテム"}
 
     def item_rec(iid, count=None, fir=False):
         rec = {"i": iid, "n": item_name.get(iid, "?")}
@@ -375,8 +388,6 @@ def build_tasks(refresh: bool, id_to_key: dict):
                 if ps:
                     locs.append({"m": key, "p": ps})
                     points += len(ps)
-            if not zs and not locs:
-                continue
             entry = {"d": o.get("description"), "t": o.get("type")}
             if o.get("optional"):
                 entry["opt"] = 1
@@ -390,6 +401,9 @@ def build_tasks(refresh: bool, id_to_key: dict):
                 ]
                 if len(o["items"]) > 8:
                     entry["itMore"] = len(o["items"]) - 8
+            if o.get("questItem"):
+                # 持ち込む(plant) / 探す(find) / 引き渡す(give) で意味が違う
+                entry["qi"] = quest_item_rec(o["questItem"])
             if o.get("markerItem"):
                 entry["mk"] = item_rec(o["markerItem"])
             if o.get("usingWeapon"):
@@ -428,13 +442,23 @@ def build_tasks(refresh: bool, id_to_key: dict):
         if t.get("wikiLink"):
             rec["w"] = t["wikiLink"]
 
-        # この課題がどのマップに関わるか
+        # この課題がどのマップに関わるか。
+        # 座標があるものが第一。座標は無いが maps でマップを名指ししている
+        # ものも、そのマップの一覧に出す。どちらも無ければ「任意のマップ」。
         keys = set()
         for obj in objectives:
             for z in obj.get("z", []):
                 keys.add(z["m"])
             for loc in obj.get("l", []):
                 keys.add(loc["m"])
+        if not keys:
+            for o in t.get("objectives") or []:
+                for mid in o.get("maps") or []:
+                    mk = id_to_key.get(mid)
+                    if mk:
+                        keys.add(mk)
+        if not keys:
+            keys = {ANY_MAP}
         for key in keys:
             # そのマップで要る鍵だけを載せる（重複は落とす）
             mine = list(dict.fromkeys(keys_by_map.get(key) or []))
@@ -452,14 +476,18 @@ def build_tasks(refresh: bool, id_to_key: dict):
     for key, recs in by_map.items():
         # トレーダー → 必要レベル → 名前 の順に並べておく。UI 側で並べ替えなくて済む
         recs.sort(key=lambda r: (r["tr"], r.get("lv") or 0, r["n"] or ""))
+        if key == ANY_MAP:
+            for r in recs:
+                r["any"] = 1
         (out_dir / f"{key}.json").write_text(
             json.dumps(recs, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
         )
         counts[key] = len(recs)
 
     total = sum((out_dir / f"{k}.json").stat().st_size for k in counts)
-    print(f"  タスク {sum(counts.values())} 件 / ゾーン {zones} / 候補点 {points} "
-          f"/ {len(counts)} ファイル {total:,} バイト", file=sys.stderr)
+    print(f"  タスク {sum(counts.values())} 件（うち任意マップ {counts.get(ANY_MAP, 0)}）"
+          f" / ゾーン {zones} / 候補点 {points} / {len(counts)} ファイル {total:,} バイト",
+          file=sys.stderr)
     return counts
 
 
@@ -795,7 +823,10 @@ def build():
     DATA.mkdir(parents=True, exist_ok=True)
     (DATA / "poi.bin").write_bytes(bytes(blob))
     svg_files = sorted(p.name for p in MAPS.glob("*.svg")) if MAPS.exists() else []
+    any_count = task_counts.get(ANY_MAP, 0)
     db = {
+        "anyTaskFile": f"data/tasks/{ANY_MAP}.json" if any_count else None,
+        "anyTaskCount": any_count,
         "version": 1,
         "generated": "build_data.py",
         "builtAt": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),

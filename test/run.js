@@ -35,7 +35,7 @@ import { ScreenshotWatcher, isSupported } from '../src/watch/index.js';
 import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '../src/app/pins.js';
 import {
   loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints,
-  taskKeyDoors, taskLoadout, OBJECTIVE_TYPE,
+  taskKeyDoors, taskLoadout, objectiveApplies, OBJECTIVE_TYPE,
 } from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
 
@@ -608,6 +608,19 @@ await check('実機サンプルが Streets の描画範囲に落ちる', () => {
   return `(${p1.px.toFixed(0)}, ${p1.py.toFixed(0)}) → (${p2.px.toFixed(0)}, ${p2.py.toFixed(0)}) = ${(svgDist / scale).toFixed(1)}m`;
 });
 
+await check('mapdb.json の項目が loadMapDb を素通りしている', async () => {
+  // svgFiles と anyTaskFile を返り値に含め忘れて、UI が空になる事故を 2 回起こした。
+  // ファイル側にある項目が落ちていないことを機械的に見る
+  const raw = await fetch('../data/mapdb.json').then((r) => r.json());
+  const missing = [];
+  for (const key of Object.keys(raw)) {
+    if (key === 'maps' || key === 'generated') continue;
+    if (db[key] === undefined) missing.push(key);
+  }
+  eq(missing.length, 0, `返り値から落ちている項目: ${missing.join(', ')}`);
+  return `${Object.keys(raw).length - 2} 項目すべてが利用側に届いている`;
+});
+
 await check('mapdb が svgFiles を返している（校正ツールの素材一覧）', () => {
   truthy(Array.isArray(db.svgFiles), 'svgFiles が配列でない');
   truthy(db.svgFiles.length >= 10, `素材が少ない: ${db.svgFiles.length}`);
@@ -1061,7 +1074,7 @@ await check('データにあるすべての種類が UI で出せる', () => {
 group('T16 タスクの目標地点');
 
 // テストページは /test/ 配下にあるので、アプリ（ルート）より 1 段深い
-const customsTasks = await loadTasks('customs', '../data/tasks/customs.json');
+const customsTasks = await loadTasks('customs', '../data/tasks/customs.json', '../data/tasks/_any.json');
 
 await check('マップごとのタスクファイルが読める', async () => {
   truthy(customsTasks.length > 20, `Customs のタスクが少ない: ${customsTasks.length}`);
@@ -1069,11 +1082,14 @@ await check('マップごとのタスクファイルが読める', async () => {
   truthy(withFile.length >= 10, `taskFile を持つマップが少ない: ${withFile.length}`);
   let sum = 0;
   for (const m of withFile) {
-    const list = await loadTasks(m.key, '../' + m.taskFile);
+    // 「任意のマップ」のぶんは別ファイルなので、ここではマップ固有だけを数える
+    const list = await loadTasks('__count_' + m.key, '../' + m.taskFile, null);
     eq(list.length, m.taskCount, `${m.key} の件数が mapdb と食い違う`);
     sum += list.length;
   }
-  return `${withFile.length} マップ / のべ ${sum} タスク（Customs ${customsTasks.length} 件）`;
+  const anyCount = customsTasks.filter((t) => t.any).length;
+  truthy(anyCount > 50, `任意マップのタスクが少ない: ${anyCount}`);
+  return `${withFile.length} マップ / マップ固有 ${sum} + 任意 ${anyCount} = Customs の一覧 ${customsTasks.length} 件`;
 });
 
 await check('タスク名と目標の説明が翻訳済み', () => {
@@ -1140,7 +1156,13 @@ await check('検索でタスクを絞れる', () => {
   eq(filterTasks(customsTasks, '').length, customsTasks.length, '空検索は全件');
   const byTrader = filterTasks(customsTasks, 'prapor');
   truthy(byTrader.length > 0, 'トレーダー名で引けない');
-  truthy(byTrader.every((t) => t.tr.toLowerCase().includes('prapor')), '無関係なものが混ざる');
+  // 目標の説明にトレーダー名が出るものもある（「Prapor に渡す」など）。
+  // 名前・トレーダー・説明のどれかに含まれていればよい
+  const hit = (t, q) =>
+    (t.n || '').toLowerCase().includes(q) ||
+    (t.tr || '').toLowerCase().includes(q) ||
+    (t.o || []).some((o) => (o.d || '').toLowerCase().includes(q));
+  truthy(byTrader.every((t) => hit(t, 'prapor')), '無関係なものが混ざる');
   const byName = filterTasks(customsTasks, customsTasks[0].n.slice(0, 6));
   truthy(byName.length > 0, 'タスク名で引けない');
   const none = filterTasks(customsTasks, 'zzzzzz該当なしzzzzzz');
@@ -1177,6 +1199,93 @@ await check('目標の種類に日本語表示がある', () => {
   const known = [...types].filter((t) => OBJECTIVE_TYPE[t]);
   truthy(known.length >= 4, `対応している種類が少ない: ${known.length}/${types.size}`);
   return `${known.length}/${types.size} 種類に日本語表示（${known.slice(0, 4).map((t) => OBJECTIVE_TYPE[t]).join('・')} …）`;
+});
+
+/* --------------------------------------------------------------------- T20 */
+
+group('T20 クエストアイテムと任意マップ');
+
+await check('クエストアイテムが持ち物に出る', () => {
+  // これらの目標は items ではなく questItem を持つ。items だけを見ていたころは
+  // 222 目標ぶんが持ち物にまったく出てこなかった
+  let planted = 0;
+  let found = 0;
+  const examples = [];
+  for (const t of customsTasks) {
+    const lo = taskLoadout(t, 'customs');
+    for (const b of lo.bring) if (b.quest) { planted++; if (examples.length < 2) examples.push(`設置 ${b.n}`); }
+    for (const f of lo.find) { found++; if (examples.length < 4) examples.push(`${f.kind === 'hand' ? '引渡' : '探す'} ${f.n}`); }
+  }
+  truthy(planted + found > 10, `クエストアイテムが出ていない: 設置 ${planted} / 探す ${found}`);
+  return `設置 ${planted} 件 / 探す・引渡 ${found} 件（${examples.join(' / ')}）`;
+});
+
+await check('クエストアイテムの名前が解決されている', () => {
+  const bad = [];
+  for (const t of customsTasks) {
+    for (const o of t.o || []) {
+      if (!o.qi) continue;
+      if (!o.qi.n || /^[0-9a-f]{24}/.test(o.qi.n) || o.qi.n === 'クエストアイテム') bad.push(o.qi.n);
+    }
+  }
+  eq(bad.length, 0, `未解決: ${bad.slice(0, 3).join(', ')}`);
+  const all = customsTasks.flatMap((t) => (t.o || []).filter((o) => o.qi).map((o) => o.qi.n));
+  return `${all.length} 件（例: ${[...new Set(all)].slice(0, 2).join(' / ')}）`;
+});
+
+await check('持ち込むものと探すものが重複しない', () => {
+  for (const t of customsTasks) {
+    const lo = taskLoadout(t, 'customs');
+    const ids = new Set(lo.bring.map((b) => b.i));
+    for (const f of lo.find) truthy(!ids.has(f.i), `${t.n}: ${f.n} が両方に出ている`);
+  }
+  return '同じアイテムが「設置」と「探す」に二重に出ない';
+});
+
+await check('任意マップのタスクが一覧に入る', () => {
+  const any = customsTasks.filter((t) => t.any);
+  truthy(any.length > 50, `任意マップのタスクが少ない: ${any.length}`);
+  for (const t of any.slice(0, 20)) {
+    truthy(taskLabel(t).startsWith('〈任意〉'), `印が付いていない: ${taskLabel(t)}`);
+  }
+  return `${any.length} 件（例: ${taskLabel(any[0])}）`;
+});
+
+await check('任意マップのタスクはどのマップでも同じ数', async () => {
+  const woods = await loadTasks('woods', '../data/tasks/woods.json', '../data/tasks/_any.json');
+  const a1 = customsTasks.filter((t) => t.any).length;
+  const a2 = woods.filter((t) => t.any).length;
+  eq(a1, a2, '任意マップのタスク数がマップで違う');
+  // マップ固有のぶんは当然違う
+  truthy(customsTasks.length !== woods.length, 'マップ固有のタスクが反映されていない');
+  return `任意 ${a1} 件は共通 / Customs ${customsTasks.length} 件 vs Woods ${woods.length} 件`;
+});
+
+await check('場所を持たない目標は「別マップ」にしない', () => {
+  // 「スカブを 10 体倒す」のような目標は、どのマップでも意味がある
+  const any = customsTasks.filter((t) => t.any);
+  let placeless = 0;
+  for (const t of any) {
+    for (const o of t.o || []) {
+      if (!(o.z || []).length && !(o.l || []).length) {
+        placeless++;
+        truthy(objectiveApplies(o, 'customs'), `場所なしの目標が除外された: ${o.d}`);
+        truthy(objectiveApplies(o, 'woods'), '別マップでも通るはず');
+      }
+    }
+  }
+  truthy(placeless > 20, `場所を持たない目標が少ない: ${placeless}`);
+  return `${placeless} 目標がどのマップでも有効`;
+});
+
+await check('目標の種別すべてに日本語表示がある', () => {
+  const missing = new Set();
+  for (const t of customsTasks) {
+    for (const o of t.o || []) if (!OBJECTIVE_TYPE[o.t]) missing.add(o.t);
+  }
+  eq(missing.size, 0, `未対応: ${[...missing].join(', ')}`);
+  const kinds = new Set(customsTasks.flatMap((t) => (t.o || []).map((o) => o.t)));
+  return `${kinds.size} 種類すべてに日本語表示`;
 });
 
 /* --------------------------------------------------------------------- T19 */
