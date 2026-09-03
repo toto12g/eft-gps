@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tests</title>
+<style>
+  body { background:#0e1112; color:#dce1df; font:13px/1.7 "IBM Plex Mono",Consolas,monospace; padding:1.5rem; }
+  pre { white-space:pre-wrap; margin:0; }
+</style>
+<pre id="out">running…</pre>
+<script type="module">
+  try {
+    await import('./run.js');
+  } catch (err) {
+    document.getElementById('out').textContent =
+      'HARNESS ERROR\n' + (err && err.stack ? err.stack : String(err)) + '\n\nRESULT pass=0 fail=1 skip=0';
+    document.title = 'FAIL harness';
+  }
+</script>

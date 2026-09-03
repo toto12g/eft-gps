@@ -1,0 +1,144 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>校正の目視検証</title>
+<style>
+  html, body { margin: 0; background: #0e1112; color: #dce1df;
+               font: 13px/1.6 "IBM Plex Mono", Consolas, monospace; }
+  #head { padding: 8px 12px; border-bottom: 1px solid #2a3133; }
+  #head b { color: #c79a4e; }
+  #head .warn { color: #c9776c; }
+  #stage { position: relative; display: block; }
+  #stage svg { display: block; width: 100%; height: auto; }
+  #base { background: #14181a; }
+  #over { position: absolute; inset: 0; pointer-events: none; }
+  .hidden-layer { display: none; }
+</style>
+
+<div id="head">loading…</div>
+<div id="stage">
+  <div id="base"></div>
+  <svg id="over" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<script type="module">
+import { applyAffine, quatToYawDeg, headingToScreenDeg } from '../src/geo/index.js';
+import { parseScreenshotName } from '../src/parse/index.js';
+
+// 実機で撮った 2 枚 (Streets)。校正が正しければ、この 2 点が
+// マップ上のありえる場所 (道路や建物のあいだ) に落ちるはず。
+const REAL_SHOTS = {
+  'streets-of-tarkov': [
+    '2026-09-03[07-29]_203.07, 4.87, 402.38_0.07438, 0.66776, -0.06734, 0.73758_16.45 (0).png',
+    '2026-09-03[07-31]_253.03, 4.36, 392.09_-0.02791, 0.97159, -0.18087, -0.15004_16.71 (0).png',
+  ],
+};
+
+const key = new URLSearchParams(location.search).get('map') || 'customs';
+const head = document.getElementById('head');
+
+const db = await fetch('../data/mapdb.json').then((r) => r.json());
+const m = db.maps.find((x) => x.key === key);
+if (!m) throw new Error('unknown map: ' + key);
+if (!m.svg) {
+  head.innerHTML = `<b>${key}</b> <span class="warn">SVG なし — 手動校正が必要</span>`;
+  document.title = 'SKIP ' + key;
+  throw new Error('no svg');
+}
+
+const [vx, vy, vw, vh] = m.svgViewBox;
+const aff = m.affine;
+
+/* ---- ベースの SVG を差し込み、tarkov-dev と同じく基準レイヤだけ表示する ---- */
+const svgText = await fetch('../' + m.svg).then((r) => r.text());
+const holder = document.getElementById('base');
+holder.innerHTML = svgText;
+const baseSvg = holder.querySelector('svg');
+baseSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+const baseLayerId = m.tarkovDev && m.tarkovDev.svgLayer;
+const groups = [...baseSvg.children].filter((c) => c.nodeName === 'g' && c.id);
+let shown = 0;
+for (const g of groups) {
+  const keep = !baseLayerId || g.id === baseLayerId || g.dataset.keepWithGroup === baseLayerId;
+  if (keep) shown++;
+  else g.classList.add('hidden-layer');
+}
+
+/* ------------------------------- オーバーレイ ------------------------------- */
+const over = document.getElementById('over');
+over.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
+over.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+const NS = 'http://www.w3.org/2000/svg';
+const unit = Math.max(vw, vh) / 400; // 図の大きさに合わせた描画単位
+
+function el(name, attrs) {
+  const n = document.createElementNS(NS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  over.appendChild(n);
+  return n;
+}
+const P = (x, z) => applyAffine(aff, x, z);
+
+// viewBox の枠
+el('rect', {
+  x: vx, y: vy, width: vw, height: vh,
+  fill: 'none', stroke: '#c79a4e', 'stroke-width': unit * 0.6, 'stroke-dasharray': unit * 4,
+});
+
+// POI 点群 (薄く)。校正が合っていれば図の描画範囲におおむね重なる
+const poi = await fetch('../data/poi.bin').then((r) => r.arrayBuffer());
+const all = new Int16Array(poi);
+const step = Math.max(1, Math.floor(m.poiCount / 1500));
+let poiOut = 0;
+for (let i = 0; i < m.poiCount; i += step) {
+  const o = (m.poiOffset + i) * 3;
+  const p = P(all[o] / 10, all[o + 2] / 10);
+  if (p.px < vx || p.px > vx + vw || p.py < vy || p.py > vy + vh) poiOut++;
+  el('circle', { cx: p.px, cy: p.py, r: unit * 0.55, fill: '#7fa6c4', 'fill-opacity': 0.5 });
+}
+
+// 脱出口: outline ポリゴンと中心点。これが図の出口・扉に乗っていれば校正は正しい
+let exOut = 0;
+for (const e of m.extracts || []) {
+  const color = e.faction === 'scav' ? '#c9776c' : e.faction === 'shared' ? '#c79a4e' : '#7fa877';
+  if ((e.outline || []).length >= 3) {
+    const pts = e.outline.map((v) => { const p = P(v.x, v.z); return `${p.px},${p.py}`; }).join(' ');
+    el('polygon', { points: pts, fill: color, 'fill-opacity': 0.35, stroke: color, 'stroke-width': unit * 0.5 });
+  }
+  if (e.position) {
+    const p = P(e.position.x, e.position.z);
+    if (p.px < vx || p.px > vx + vw || p.py < vy || p.py > vy + vh) exOut++;
+    el('circle', { cx: p.px, cy: p.py, r: unit * 2.2, fill: 'none', stroke: color, 'stroke-width': unit * 0.8 });
+    const t = el('text', {
+      x: p.px + unit * 3, y: p.py + unit * 1.2, fill: color,
+      'font-size': unit * 4.5, 'font-family': 'monospace',
+      stroke: '#0e1112', 'stroke-width': unit * 0.9, 'paint-order': 'stroke',
+    });
+    t.textContent = String(e.name || '').replace(/^EXFIL[_ ]?/i, '');
+  }
+}
+
+// 実機サンプル
+const shots = (REAL_SHOTS[key] || []).map(parseScreenshotName).filter(Boolean);
+for (const s of shots) {
+  const p = P(s.x, s.z);
+  el('circle', { cx: p.px, cy: p.py, r: unit * 3.2, fill: '#ffffff', stroke: '#0e1112', 'stroke-width': unit });
+  const deg = headingToScreenDeg(aff, quatToYawDeg(s.q));
+  const r = (deg - 90) * Math.PI / 180;
+  el('line', {
+    x1: p.px, y1: p.py,
+    x2: p.px + Math.cos(r) * unit * 14, y2: p.py + Math.sin(r) * unit * 14,
+    stroke: '#ffffff', 'stroke-width': unit * 1.6,
+  });
+}
+
+head.innerHTML =
+  `<b>${key}</b>  viewBox ${vw.toFixed(0)}×${vh.toFixed(0)}  ` +
+  `基準レイヤ=${baseLayerId || '(全部)'} (${shown}/${groups.length} 表示)  ` +
+  `POI ${m.poiCount} 点 (枠外 ${poiOut}/${Math.ceil(m.poiCount / step)})  ` +
+  `脱出口 ${(m.extracts || []).length} (枠外 ${exOut})  ` +
+  `letterbox ${(m.calib.letterbox * 100).toFixed(2)}%` +
+  (shots.length ? `  <span style="color:#fff">実機サンプル ${shots.length} 点 = 白丸</span>` : '');
+
+document.title = 'CALIB ' + key;
+</script>

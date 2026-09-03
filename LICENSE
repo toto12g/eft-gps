@@ -1,0 +1,64 @@
+EFT 測位クライアント
+Copyright (c) 2026
+
+このリポジトリ全体は
+Creative Commons 表示 - 非営利 - 継承 4.0 国際 (CC BY-NC-SA 4.0)
+のもとで提供されます。
+
+  https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ja
+
+要点:
+  - 表示     著作者のクレジットを表示すること
+  - 非営利   営利目的で利用しないこと（広告・課金・サブスクリプションを含む）
+  - 継承     改変した場合、同じライセンスで公開すること
+
+
+なぜ CC BY-NC-SA なのか
+-----------------------
+地図素材に the-hideout/tarkov-dev-svg-maps (CC BY-NC-SA 4.0) を同梱している
+ため、継承条項により全体が同じライセンスになります。
+
+
+素材側の追加禁止条項
+--------------------
+tarkov-dev-svg-maps は、チートや不公平な優位を得ることを目的としたソフトウェア
+での使用を明確に禁止しています。これには以下が含まれます（これらに限りません）。
+
+  - ゲーム内レーダー、ESP オーバーレイ
+  - チートクライアント向けの改変マップ
+  - 自動化スクリプト、ピクセルボット
+
+本ソフトウェアはゲームプロセス・ゲームフォルダに一切アクセスせず、ユーザーが
+自分で撮ったスクリーンショットのファイル名のみを読みます。オーバーレイ表示を
+追加すると上記に抵触しうるため、第 2 モニタ / 別ウィンドウでの表示を前提と
+してください。
+
+
+同梱物とその出典
+----------------
+maps/*.svg
+  the-hideout/tarkov-dev-svg-maps  (CC BY-NC-SA 4.0)
+  https://github.com/the-hideout/tarkov-dev-svg-maps
+  各マップの作者は data/mapdb.json および tarkov-dev の maps.json を参照。
+
+data/mapdb.json, data/poi.bin
+  the-hideout/tarkov-dev (MIT) および tarkov.dev API のデータから生成
+  https://github.com/the-hideout/tarkov-dev
+  https://tarkov.dev/
+
+vendor/leaflet/
+  Leaflet 1.9.4 (BSD-2-Clause)
+  Copyright (c) 2010-2023, Volodymyr Agafonkin
+  Copyright (c) 2010-2011, CloudMade
+  https://leafletjs.com/
+
+ゲーム内時計の換算式
+  adamburgess/tarkov-time 由来の実装を参考にしています。
+  https://github.com/adamburgess/tarkov-time
+
+
+免責
+----
+本ソフトウェアは非公式のファンツールです。Battlestate Games Limited とは
+無関係であり、同社の承認を受けたものではありません。Escape from Tarkov および
+関連する名称・地名・意匠は Battlestate Games Limited に帰属します。

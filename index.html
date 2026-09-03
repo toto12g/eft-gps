@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EFT 測位クライアント</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#0e1112">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
+<style>
+:root {
+  --bg: #0e1112; --panel: #16191b; --panel-2: #1c2123; --rule: #2a3133;
+  --ink: #dce1df; --ink-2: #aab3b1; --muted: #8b9694;
+  --accent: #c79a4e; --ok: #7fa877; --warn: #c9776c; --info: #7fa6c4;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --sans: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 13px/1.7 var(--sans); display: grid;
+  grid-template-columns: 340px 1fr; overflow: hidden;
+}
+
+/* ------------------------------------------------------------- sidebar */
+#side { background: var(--panel); border-right: 1px solid var(--rule);
+        display: flex; flex-direction: column; overflow-y: auto; }
+#side > * { padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
+h1 small { display: block; font: 400 10px/1.5 var(--mono); color: var(--muted);
+           letter-spacing: .08em; text-transform: uppercase; margin-top: 3px; }
+label { display: block; font: 600 10px/1.6 var(--mono); letter-spacing: .1em;
+        text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+select, input, button, textarea {
+  font: 12px/1.5 var(--mono); color: var(--ink); background: var(--panel-2);
+  border: 1px solid var(--rule); border-radius: 2px; padding: 6px 8px; width: 100%;
+}
+select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); color: var(--accent); }
+.field + .field { margin-top: 10px; }
+.btn-row { display: flex; gap: 8px; margin-top: 8px; }
+
+#map-info, #attrib { font: 11px/1.6 var(--mono); color: var(--muted); }
+#map-missing { color: var(--warn); font-size: 12px; margin-top: 8px; }
+
+.status { font: 12px/1.5 var(--mono); padding: 8px 10px; border-radius: 2px;
+          border-left: 3px solid var(--muted); background: var(--panel-2); }
+.status.ok   { border-left-color: var(--ok);     color: var(--ok); }
+.status.warn { border-left-color: var(--warn);   color: var(--warn); }
+.status.low  { border-left-color: var(--accent); color: var(--accent); }
+.status.off  { border-left-color: var(--muted);  color: var(--muted); }
+.status.idle { border-left-color: var(--rule);   color: var(--muted); }
+
+#sample .row { display: grid; grid-template-columns: 84px 1fr; gap: 8px; padding: 2px 0; }
+#sample .k { font: 600 10px/1.9 var(--mono); letter-spacing: .06em; color: var(--muted); }
+#sample .v { font: 12px/1.6 var(--mono); word-break: break-all; }
+#sample .hint { color: var(--muted); font-size: 12px; }
+
+#clock { display: flex; justify-content: space-between; align-items: baseline; }
+#world-clock { font: 600 13px/1 var(--mono); color: var(--accent); }
+
+.safety { font-size: 11px; color: var(--muted); line-height: 1.7; }
+.safety b { color: var(--ink-2); font-weight: 600; }
+.safety code { font: 10px/1.5 var(--mono); color: var(--ink-2); word-break: break-all; }
+.muted-line { font: 11px/1.8 var(--mono); color: var(--muted); min-height: 18px; }
+label.check { display: flex; gap: 7px; align-items: flex-start; margin-top: 8px;
+              font: 400 11px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
+              color: var(--ink-2); cursor: pointer; }
+label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+#side > .grow { flex: 1; border-bottom: 0; }
+
+/* ----------------------------------------------------------------- map */
+#map { height: 100vh; background: #0a0c0d; }
+.leaflet-container { background: #0a0c0d; font-family: var(--mono); }
+.leaflet-control-attribution { background: rgba(14,17,18,.8); color: var(--muted); font-size: 10px; }
+.leaflet-control-attribution a { color: var(--muted); }
+.leaflet-bar a { background: var(--panel); color: var(--ink); border-color: var(--rule); }
+.leaflet-bar a:hover { background: var(--panel-2); color: var(--accent); }
+
+.chips { display: flex; gap: 6px; }
+.chip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+        margin: 0; padding: 6px 4px; border: 1px solid var(--rule); border-radius: 2px;
+        background: var(--panel-2); cursor: pointer;
+        font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: none;
+        color: var(--muted); }
+.chip input { width: auto; margin: 0; accent-color: currentColor; }
+.chip[data-f="pmc"]:has(:checked)    { color: #6fd66f; border-color: #6fd66f66; }
+.chip[data-f="scav"]:has(:checked)   { color: #ff7a5c; border-color: #ff7a5c66; }
+.chip[data-f="shared"]:has(:checked) { color: #ffc848; border-color: #ffc84866; }
+
+/* 脱出口 — 小さすぎて見えないという指摘を受けて拡大した */
+.extract-icon .dot {
+  position: absolute; left: -7px; top: -7px; width: 14px; height: 14px;
+  border-radius: 50%; border: 3px solid var(--c); background: rgba(10,12,13,.75);
+  box-shadow: 0 0 0 1px rgba(10,12,13,.9), 0 0 6px rgba(0,0,0,.7);
+}
+.extract-icon .label {
+  position: absolute; left: 12px; top: -9px; white-space: nowrap;
+  font: 600 12px/1.4 var(--mono); color: var(--c); letter-spacing: .02em;
+  text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 1px 2px #0a0c0d;
+}
+
+/* 現在地 — 白は地図に溶けるのでシアンにし、暗い縁と輪で浮かせている */
+.player-icon > span { position: absolute; }
+.player-icon .player-ring {
+  left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid #22e0ff; opacity: .5;
+  box-shadow: 0 0 0 2px rgba(10,12,13,.8), 0 0 10px rgba(34,224,255,.55);
+}
+.player-icon .player-arrow {
+  left: -13px; top: -13px; width: 26px; height: 26px;
+  background: #22e0ff; clip-path: polygon(50% 0%, 100% 100%, 50% 74%, 0% 100%);
+  filter: drop-shadow(0 0 2px #0a0c0d) drop-shadow(0 0 6px rgba(34,224,255,.9));
+}
+.player-icon .player-dot {
+  left: -8px; top: -8px; width: 16px; height: 16px; border-radius: 50%;
+  background: #22e0ff; border: 2px solid #0a0c0d;
+  filter: drop-shadow(0 0 6px rgba(34,224,255,.9));
+}
+.player-icon .unsure { opacity: .5; }
+
+@media (max-width: 780px) {
+  body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; }
+  #map { height: 60vh; }
+}
+
+/* ------------------------------------------------------- はじめての設定 */
+.setup { position: fixed; inset: 0; z-index: 2000; background: rgba(6,8,9,.82);
+         display: flex; align-items: flex-start; justify-content: center;
+         overflow-y: auto; padding: 3vh 16px; }
+.setup[hidden] { display: none; }
+.setup-card { position: relative; width: min(680px, 100%); background: var(--panel);
+              border: 1px solid var(--rule); border-radius: 3px; padding: 26px 30px 24px; }
+.setup-card h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
+.setup-lede { margin: 0 0 18px; font-size: 13px; color: var(--ink-2); max-width: 60ch; }
+.setup-lede b { color: var(--ink); }
+.setup-close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px;
+               padding: 0; border: 0; background: transparent; color: var(--muted);
+               font: 20px/1 var(--mono); cursor: pointer; }
+.setup-close:hover { color: var(--accent); border: 0; }
+.setup-steps { counter-reset: st; list-style: none; margin: 0; padding: 0;
+               display: flex; flex-direction: column; gap: 20px; }
+.setup-steps > li { counter-increment: st; padding-left: 38px; position: relative; }
+.setup-steps > li::before {
+  content: counter(st); position: absolute; left: 0; top: 1px;
+  width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--accent);
+  color: var(--accent); font: 600 12px/22px var(--mono); text-align: center; }
+.setup-steps h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.setup-steps p { margin: 0 0 6px; font-size: 12.5px; color: var(--ink-2); }
+.setup-steps b { color: var(--ink); }
+.setup-note { font-size: 11.5px !important; color: var(--muted) !important;
+              border-left: 2px solid var(--rule); padding-left: 10px; }
+.setup-steps code, .setup-req code { font: 11.5px/1.5 var(--mono); color: var(--accent);
+                                     word-break: break-all; }
+.setup-steps kbd { font: 11px/1.5 var(--mono); color: var(--ink);
+                   border: 1px solid var(--rule); border-radius: 2px; padding: 1px 5px;
+                   background: var(--panel-2); }
+.path-row { display: flex; gap: 8px; align-items: center; margin: 0 0 10px;
+            background: var(--panel-2); border: 1px solid var(--rule);
+            border-radius: 2px; padding: 7px 9px; }
+.path-row code { flex: 1; }
+.copy-btn { width: auto; flex: none; padding: 4px 10px; font-size: 11px; }
+.setup-req { margin: 20px 0 0; padding: 12px 14px; background: var(--panel-2);
+             border-left: 3px solid var(--accent); border-radius: 2px; font-size: 12px; }
+.setup-req > b:first-child { display: block; margin-bottom: 5px; color: var(--ink); }
+.setup-req li b { color: var(--ink); }
+.setup-req ul { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.setup-done { margin-top: 20px; padding: 9px; font-size: 13px; }
+#btn-setup { margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div id="setup" class="setup" hidden>
+  <div class="setup-card">
+    <button type="button" id="setup-close" class="setup-close" aria-label="閉じる">×</button>
+    <h2>はじめての設定</h2>
+    <p class="setup-lede">
+      このツールは、Escape from Tarkov がスクリーンショットを保存するときに
+      <b>ファイル名へ書き込む座標</b>を読んで、地図に現在地を出します。
+      画像の中身は開きません。ゲームにも一切触れません。
+    </p>
+
+    <ol class="setup-steps">
+      <li>
+        <h3>スクリーンショットの保存先を確認する</h3>
+        <p>EFT の保存先は固定で、変更できません。ふつうはここです。</p>
+        <div class="path-row">
+          <code id="path-a">%USERPROFILE%\Documents\Escape from Tarkov\Screenshots</code>
+          <button type="button" class="copy-btn" data-copy="path-a">コピー</button>
+        </div>
+        <p>ドキュメントが OneDrive にリダイレクトされている場合（日本語版 Windows に多い）はこちら。</p>
+        <div class="path-row">
+          <code id="path-b">%USERPROFILE%\OneDrive\ドキュメント\Escape from Tarkov\Screenshots</code>
+          <button type="button" class="copy-btn" data-copy="path-b">コピー</button>
+        </div>
+        <p class="setup-note">
+          エクスプローラーのアドレス欄に貼って Enter を押すと、その場所が開きます。
+          開かないほうが「存在しないフォルダ」です。
+        </p>
+      </li>
+
+      <li>
+        <h3>ゲーム内で 1 枚だけ撮っておく</h3>
+        <p>
+          既定のキーは <kbd>Print Screen</kbd> です（EFT の設定で変更している場合はそのキー）。
+          <b>まだ 1 枚も撮っていないと Screenshots フォルダ自体が存在せず</b>、次の手順で選べません。
+        </p>
+        <p class="setup-note">
+          ファイル名が <code>2026-09-03[07-31]_253.03, 4.36, 392.09_… (0).png</code> のように
+          数字の並んだ形になっていれば正解です。数字が入っていない場合は、Steam や
+          GeForce Experience など<b>別のソフトのスクリーンショット機能</b>で撮れています。
+          その場合は EFT 内蔵のキーで撮り直してください。
+        </p>
+      </li>
+
+      <li>
+        <h3>そのフォルダをこのページに接続する</h3>
+        <p>
+          左の<b>「フォルダを選ぶ」</b>を押して、手順 1 で確認した
+          <code>Screenshots</code> フォルダを指定します。ブラウザが確認を出すので許可してください。
+        </p>
+        <p class="setup-note">
+          読み取り専用で開きます。ファイルの作成・変更・削除は一切しません。
+          選んだ場所はこのブラウザの中だけに記録され、どこにも送信されません。
+        </p>
+      </li>
+
+      <li>
+        <h3>マップを選んでレイドへ</h3>
+        <p>
+          左上でマップを選び、あとはレイド中にスクリーンショットを撮るだけです。
+          撮るたびに現在地が動きます。マップを選び間違えても、座標から判断して
+          自動で正しいほうに合わせます。
+        </p>
+      </li>
+    </ol>
+
+    <div class="setup-req">
+      <b>必要なもの</b>
+      <ul>
+        <li>デスクトップ版の <b>Chrome</b> または <b>Edge</b>（Firefox / Safari はフォルダ接続に非対応）</li>
+        <li>ページを再読み込みしたときは、<b>「権限を許可」</b>を一度押してください。フォルダの選び直しは不要です</li>
+      </ul>
+    </div>
+
+    <button type="button" id="setup-done" class="setup-done">閉じてはじめる</button>
+  </div>
+</div>
+
+<div id="side">
+  <div>
+    <h1>EFT 測位クライアント<small>screenshot filename → position</small></h1>
+  </div>
+
+  <div>
+    <div class="field">
+      <label for="map-select">マップ（手動選択）</label>
+      <select id="map-select"></select>
+    </div>
+    <div class="field">
+      <label for="floor-select">フロア</label>
+      <select id="floor-select" disabled></select>
+    </div>
+    <div class="field">
+      <label>脱出口の表示</label>
+      <div id="faction-filter" class="chips">
+        <label class="chip" data-f="pmc"><input type="checkbox" value="pmc" checked><span>PMC</span></label>
+        <label class="chip" data-f="scav"><input type="checkbox" value="scav" checked><span>スカブ</span></label>
+        <label class="chip" data-f="shared"><input type="checkbox" value="shared" checked><span>共通</span></label>
+      </div>
+    </div>
+    <div id="map-info" style="margin-top:8px"></div>
+    <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
+  </div>
+
+  <div>
+    <label>スクリーンショットフォルダ</label>
+    <div id="watch-status" class="status idle">フォルダ未接続</div>
+    <div class="btn-row">
+      <button type="button" id="btn-pick">フォルダを選ぶ</button>
+      <button type="button" id="btn-grant" hidden>権限を許可</button>
+      <button type="button" id="btn-forget" hidden>接続を解除</button>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="btn-replay" hidden>直近 20 枚を読み込む</button>
+      <button type="button" id="btn-setup">セットアップ手順</button>
+    </div>
+    <div id="watch-count" class="muted-line"></div>
+    <label class="check">
+      <input type="checkbox" id="auto-switch" checked>
+      <span>座標から確実に判別できたらマップを自動で合わせる</span>
+    </label>
+    <p class="safety" style="margin:8px 0 0">
+      既定は <code>ドキュメント\Escape from Tarkov\Screenshots</code>。OneDrive に
+      リダイレクトされている場合はそちらを選んでください。
+    </p>
+  </div>
+
+  <div>
+    <form id="input-form">
+      <div class="field">
+        <label for="input-text">ファイル名を貼り付ける / 座標を直接入力</label>
+        <textarea id="input-text" rows="3" spellcheck="false"
+          placeholder="2026-09-03[07-31]_253.03, 4.36, 392.09_-0.02791, 0.97159, -0.18087, -0.15004_16.71 (0).png"></textarea>
+      </div>
+      <div class="btn-row">
+        <button type="submit">現在地を出す</button>
+        <button type="button" id="btn-clear">軌跡を消す</button>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="btn-switch" hidden></button>
+      </div>
+    </form>
+  </div>
+
+  <div><div id="status" class="status idle">待機中</div></div>
+
+  <div id="sample"><div class="hint">ファイル名を貼り付けるか、座標を入力してください。</div></div>
+
+  <div id="clock">
+    <label style="margin:0">ワールド時計</label>
+    <span id="world-clock">--:-- / --:--</span>
+  </div>
+
+  <div class="grow">
+    <p class="safety">
+      このアプリは<b>スクリーンショットのファイル名だけ</b>を読みます。画像の中身は開かず、
+      ゲームフォルダにもアクセスせず、座標を外部に送信しません。すべてブラウザ内で完結します。
+    </p>
+    <p class="safety" id="attrib"></p>
+    <p class="safety">
+      非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
+    </p>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<script src="./vendor/leaflet/leaflet.js"></script>
+<script type="module" src="./src/app/main.js"></script>
+</body>
+</html>

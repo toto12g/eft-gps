@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>校正コンタクトシート</title>
+<style>
+  html,body{margin:0;background:#0e1112;color:#dce1df;font:12px/1.4 "IBM Plex Mono",Consolas,monospace}
+  #grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;padding:6px}
+  .cell{position:relative;background:#14181a;border:1px solid #2a3133}
+  .cell iframe{width:100%;height:640px;border:0;display:block}
+</style>
+<div id="grid"></div>
+<script type="module">
+const keys = (new URLSearchParams(location.search).get('maps') || '').split(',').filter(Boolean);
+const grid = document.getElementById('grid');
+for (const k of keys) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const f = document.createElement('iframe');
+  f.src = './calib.html?map=' + encodeURIComponent(k);
+  cell.appendChild(f);
+  grid.appendChild(cell);
+}
+document.title = 'CONTACT ' + keys.length;
+</script>
