@@ -265,6 +265,7 @@ export class MapView {
   setPlayer(pos, yawDeg, confident = true) {
     const L = this.L;
     if (this.playerLayer) this.playerLayer.remove();
+    this.playerLayer = null;
     if (!this.mapData || !this.mapData.affine || !pos) return;
 
     const aff = this.mapData.affine;
@@ -451,8 +452,9 @@ export class MapView {
 
         const marker = L.marker(latlng, {
           icon: L.divIcon({
-            // 湧きは陣営(item.s)で見た目を変える。数が多いので色分けが要る
-            className: `lm-icon lm-kind-${def.id}${item.s ? ' lm-side-' + item.s : ''}`,
+            // 湧きは陣営(item.sd)で見た目を変える。数が多いので色分けが要る。
+            // label の s は文字サイズなので、別のキーを使わないと衝突する
+            className: `lm-icon lm-kind-${def.id}${item.sd ? ' lm-side-' + item.sd : ''}`,
             html,
             iconSize: [0, 0],
           }),
@@ -496,6 +498,24 @@ export class MapView {
     });
     this.northCtl = new Ctl({ position: 'bottomright' });
     this.northCtl.addTo(this.map);
+  }
+
+  /**
+   * ワールド座標が、いま出している地図画像の内側かどうか。
+   *
+   * 判定層をすり抜けたときの最後の砦。地図の外に現在地を描くと、
+   * 「ツールが壊れている」ようにしか見えない。描かないほうがまだ正直。
+   * @returns {number} はみ出し量 (m)。内側なら 0
+   */
+  outsideImageMeters(x, z) {
+    if (!this.mapData || !this.mapData.affine || !this.mapData.svgViewBox) return 0;
+    const a = this.mapData.affine;
+    const [vx, vy, vw, vh] = this.mapData.svgViewBox;
+    const px = a.a * x + a.b * z + a.c;
+    const py = a.d * x + a.e * z + a.f;
+    const over = Math.max(vx - px, px - (vx + vw), vy - py, py - (vy + vh), 0);
+    const scale = Math.hypot(a.a, a.d) || 1;
+    return over / scale;
   }
 
   /**

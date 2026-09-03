@@ -1037,11 +1037,22 @@ async function applySample(sample, fileModifiedMs, live) {
       ? nearestPoiPoint(m, sample.x, sample.y, sample.z)
       : null,
   );
-  if (m && m.affine && isDrawable(verdict.verdict)) {
+  // 判定を通っても、地図画像の外に出るなら描かない。
+  // 外に点を打つと「ツールが壊れている」ようにしか見えないので、
+  // 黙って描くより、描けない理由を出すほうが親切。
+  const over = m && m.affine ? state.view.outsideImageMeters(sample.x, sample.z) : 0;
+  if (m && m.affine && isDrawable(verdict.verdict) && over <= 1) {
     syncFloor(sample);
     state.shownAt = fileModifiedMs ?? sample.takenAtMs ?? Date.now();
     state.view.setPlayer(sample, headingOf(sample), verdict.verdict === VERDICT.ACCEPT);
     updateAge();
+  } else if (over > 1) {
+    state.view.setPlayer(null);
+    setStatus(
+      `この座標は ${state.selectedKey} の地図の外です（${over.toFixed(0)} m 外）。` +
+      `マップの選択を確かめてください`,
+      'warn',
+    );
   }
   renderPins(); // 現在地が動いたので距離と方位を出し直す
   renderObjectives();

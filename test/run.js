@@ -1238,6 +1238,86 @@ await check('目標の種類に日本語表示がある', () => {
 
 /* --------------------------------------------------------------------- T24 */
 
+/* --------------------------------------------------------------------- T25 */
+
+group('T25 現在地が地図の外に描かれる不具合（報告された不具合）');
+
+// RAID1 と同じゲーム内時刻（= MTIME.raid1 と一致する）で、座標だけ差し替える
+const withPos = (x, y, z) => RAID1.replace(/_[-\d.]+, [-\d.]+, [-\d.]+_/, `_${x}, ${y}, ${z}_`);
+
+await check('ゲーム内時計だけでは、そのマップにいる証拠にならない', () => {
+  // 時計は「レイド中である」ことしか言えない。どのマップでも同じように合う。
+  // 座標を確かめずに accept していたため、選択中のマップの座標ではない点が
+  // そのまま描かれていた。全マップの格子で調べた結果、地図の外に現在地が
+  // 出る経路はすべてこの分岐だった（最大 987m 外）。
+  // どの POI からも遠い点なので単発では決められず、必ず時計の分岐に落ちる
+  const s = parseScreenshotName(withPos(-4000, 0, -4000));
+  const c = checkGameClock(s.gameTime, MTIME.raid1);
+  truthy(c.agrees, 'この検査の前提: 時計は一致している');
+  const accepted = [];
+  for (const m of db.maps) {
+    const v = validateSample({ sample: s, selectedKey: m.key, db, fileModifiedMs: MTIME.raid1 });
+    if (v.verdict === VERDICT.ACCEPT) accepted.push(m.key);
+  }
+  eq(accepted.length, 0, `どのマップの範囲外なのに accept された: ${accepted.join(', ')}`);
+  return `${db.maps.length} マップすべてで accept されない（時計は一致したまま）`;
+});
+
+await check('選択中のマップの範囲内なら、時計での accept は今までどおり', () => {
+  // 直し過ぎていないことの確認。範囲内かつ時計一致なら accept のまま
+  const woods = db.byKey.get('woods');
+  const cx = (woods.bbox.x[0] + woods.bbox.x[1]) / 2;
+  const cz = (woods.bbox.z[0] + woods.bbox.z[1]) / 2;
+  const cy = (woods.bbox.y[0] + woods.bbox.y[1]) / 2;
+  const s = parseScreenshotName(withPos(cx.toFixed(2), cy.toFixed(2), cz.toFixed(2)));
+  const v = validateSample({ sample: s, selectedKey: 'woods', db, fileModifiedMs: MTIME.raid1 });
+  eq(v.verdict, VERDICT.ACCEPT, `bbox の中心なのに ${v.verdict}: ${v.reason}`);
+  return v.reason;
+});
+
+await check('全マップ総当たりで、描画される判定は必ず地図画像の内側', () => {
+  // 「現在地がマップ外に飛ぶ」の再発防止。各マップの bbox を格子で走査し、
+  // 他マップを選んだ状態での判定と、その座標が画像に収まるかを突き合わせる。
+  const outside = (m, x, z) => {
+    const a = m.affine;
+    const [vx, vy, vw, vh] = m.svgViewBox;
+    const px = a.a * x + a.b * z + a.c;
+    const py = a.d * x + a.e * z + a.f;
+    const over = Math.max(vx - px, px - (vx + vw), vy - py, py - (vy + vh), 0);
+    return over / (Math.hypot(a.a, a.d) || 1);
+  };
+  const drawn = [];
+  let checked = 0;
+  const withMap = db.maps.filter((m) => m.affine && m.svgViewBox);
+  for (const tgt of withMap) {
+    for (const src of withMap) {
+      if (src.key === tgt.key) continue;
+      for (let i = 0; i <= 6; i++) {
+        for (let j = 0; j <= 6; j++) {
+          const x = src.bbox.x[0] + ((src.bbox.x[1] - src.bbox.x[0]) * i) / 6;
+          const z = src.bbox.z[0] + ((src.bbox.z[1] - src.bbox.z[0]) * j) / 6;
+          const y = (src.bbox.y[0] + src.bbox.y[1]) / 2;
+          const over = outside(tgt, x, z);
+          if (over < 50) continue;
+          checked++;
+          const s = parseScreenshotName(withPos(x.toFixed(1), y.toFixed(1), z.toFixed(1)));
+          const v = validateSample({ sample: s, selectedKey: tgt.key, db, fileModifiedMs: MTIME.raid1 });
+          // 判定層を通ってしまっても、描画側の outsideImageMeters が止める。
+          // ここでは判定層だけで何件抜けるかを固定する
+          if (v.verdict === VERDICT.ACCEPT || v.verdict === VERDICT.LOW_CONFIDENCE) {
+            drawn.push(`${tgt.key}←${src.key} ${over.toFixed(0)}m外 ${v.verdict}`);
+          }
+        }
+      }
+    }
+  }
+  // 判定層で止まらず残るのは、選択中マップの bbox には入るが画像には
+  // 収まらない帯（最大 71m）だけ。ここは描画側の砦で止める
+  truthy(drawn.length / checked < 0.05,
+    `判定層を抜ける割合が増えた: ${drawn.length}/${checked}（例 ${drawn.slice(0, 3).join(' / ')}）`);
+  return `画像外の ${checked} 点のうち、判定層を抜けるのは ${drawn.length} 点（残りは描画側で阻止）`;
+});
+
 group('T24 追加レイヤと方位（検収 B-3 / B-4 / B-5 / E-3）');
 await check('レイド外が続くと累積を捨てる（検収 D-3）', () => {
   // 前のレイドの軌跡を次のレイドに持ち越さない。
@@ -1329,11 +1409,11 @@ await check('湧きと砲撃のレイヤが用意されている', async () => {
 
 await check('湧きが 25m 格子で間引かれ、陣営が残っている', async () => {
   const lm = await loadLandmarks('woods', '../' + db.byKey.get('woods').landmarkFile);
-  const sides = new Set((lm.spawn || []).map((s) => s.s));
+  const sides = new Set((lm.spawn || []).map((s) => s.sd));
   truthy(sides.size >= 2, `陣営が 1 種類しかない: ${[...sides].join(',')}`);
   // 格子の切り方を JS 側で再現すると、Python の round との差で
   // 境界の 1 点だけ食い違う。守りたいのは「重複が消えて数が減っている」こと
-  const exact = new Set((lm.spawn || []).map((s) => `${s.s}/${s.p[0]}/${s.p[2]}`));
+  const exact = new Set((lm.spawn || []).map((s) => `${s.sd}/${s.p[0]}/${s.p[2]}`));
   eq(exact.size, lm.spawn.length, '完全に同じ位置の点が残っている');
   truthy(lm.spawn.length < 260, `間引きが効いていない: ${lm.spawn.length} 点（生データは 327）`);
   return `woods ${lm.spawn.length} 点 / 陣営 ${[...sides].join(', ')}`;

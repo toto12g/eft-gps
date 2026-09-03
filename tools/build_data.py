@@ -291,7 +291,8 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
             seen_spawn.add(cell)
             bucket(k, "spawn").append({
                 "n": {"pmc": "PMC 湧き", "scav": "スカブ湧き"}.get(side, "湧き"),
-                "s": side,
+                # "s" は label が文字サイズに使っているので別名にする
+                "sd": side,
                 "p": pos3(p),
             })
 

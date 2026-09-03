@@ -20,7 +20,7 @@
  *   そのため MapTracker で累積してから判断する。
  */
 
-import { rankMaps } from '../mapdb/index.js';
+import { rankMaps, inBbox } from '../mapdb/index.js';
 import { checkGameClock } from '../clock/index.js';
 
 export const VERDICT = {
@@ -54,6 +54,11 @@ export const DEFAULT_THRESHOLDS = {
   trackerRatio: 1.5,
   /** ゲーム内時計の許容差 (時間) */
   clockToleranceH: 0.02,
+  /**
+   * 選択中のマップの bbox からこれだけ外なら、そのマップの座標ではない (m)。
+   * MapTracker の bbox 判定と同じ値。
+   */
+  bboxMargin: 40,
 };
 
 /**
@@ -365,11 +370,28 @@ export function validateSample({
   if (d1 < th.nearM && ratio > th.ratio) {
     return { ...base, verdict: VERDICT.ACCEPT, reason: `${best} に一致 (${d1.toFixed(2)}m)` };
   }
+  // ゲーム内時計が言えるのは「レイド中である」ことだけで、
+  // 「どのマップにいるか」ではない。時計はどのマップでも同じように合う。
+  //
+  // ここで座標を確かめずに ACCEPT していたため、選択中のマップの座標では
+  // ない点がそのまま描かれていた。全 11 マップの格子で調べたところ、
+  // 画像の外に現在地が描かれる経路はすべてこの分岐だった
+  // （最大 987m 外）。レイド序盤の 2 枚（累積がまだ効かない）で起きる。
   if (clockAgrees) {
+    const sel = db.maps.find((m) => m.key === selectedKey);
+    if (sel && inBbox(sel, sample.x, sample.y, sample.z, th.bboxMargin)) {
+      return {
+        ...base,
+        verdict: VERDICT.ACCEPT,
+        reason: `ゲーム内時計が一致 (差 ${(clock.diff * 60).toFixed(1)}分)`,
+      };
+    }
     return {
       ...base,
-      verdict: VERDICT.ACCEPT,
-      reason: `ゲーム内時計が一致 (差 ${(clock.diff * 60).toFixed(1)}分)`,
+      verdict: VERDICT.WRONG_MAP,
+      reason:
+        `レイド中だが ${selectedKey} の範囲外 ` +
+        `(最寄り ${best} ${d1.toFixed(1)}m)`,
     };
   }
 
