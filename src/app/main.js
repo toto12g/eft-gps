@@ -114,10 +114,10 @@ async function boot() {
   }
   state.view.factions = new Set(state.factions);
 
+  setupWatcher();
   setupGuide();
   setupPins();
   setupTasks();
-  setupWatcher();
 
   await selectMap(state.selectedKey);
   tickClock();
@@ -386,6 +386,19 @@ function setupGuide() {
     panel.hidden = true;
     localStorage.setItem('eft-gps.setupSeen', '1');
   };
+
+  // 手順の中から直接フォルダを選べるようにする。初めての人が
+  // サイドバーを下までスクロールしてボタンを探さずに済む。
+  const pick = $('setup-pick');
+  pick.addEventListener('click', async () => {
+    if (!state.watcher) return;
+    await state.watcher.pick();
+    if (state.watcher.status === WATCH.WATCHING) close();
+  });
+  if (!isSupported()) {
+    pick.disabled = true;
+    pick.textContent = 'このブラウザでは使えません（Chrome / Edge が必要）';
+  }
 
   $('setup-close').addEventListener('click', close);
   $('setup-done').addEventListener('click', close);

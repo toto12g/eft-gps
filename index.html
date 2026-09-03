@@ -252,6 +252,9 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 .setup-req li b { color: var(--ink); }
 .setup-req ul { margin: 0; padding-left: 18px; color: var(--ink-2); }
 .setup-done { margin-top: 20px; padding: 9px; font-size: 13px; }
+.setup-pick { margin-top: 8px; padding: 8px; font-size: 12px; color: var(--accent);
+              border-color: var(--accent); background: #2a2416; }
+.setup-pick[disabled] { opacity: .5; }
 #btn-setup { margin-top: 8px; }
 </style>
 </head>
@@ -310,6 +313,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
           読み取り専用で開きます。ファイルの作成・変更・削除は一切しません。
           選んだ場所はこのブラウザの中だけに記録され、どこにも送信されません。
         </p>
+        <button type="button" id="setup-pick" class="setup-pick">ここからフォルダを選ぶ</button>
       </li>
 
       <li>
@@ -335,6 +339,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 </div>
 
 <div id="side">
+
   <div>
     <h1>EFT 測位クライアント<small>screenshot filename → position</small></h1>
   </div>
@@ -358,6 +363,35 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
     </div>
     <div id="map-info" style="margin-top:8px"></div>
     <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
+  </div>
+
+  <div><div id="status" class="status idle">待機中</div></div>
+
+  <div id="sample"><div class="hint">ファイル名を貼り付けるか、座標を入力してください。</div></div>
+
+  <div>
+    <label for="task-select">タスクの目標地点</label>
+    <input type="search" id="task-filter" placeholder="タスク名・トレーダー・目標で絞り込む" autocomplete="off">
+    <select id="task-select" style="margin-top:8px"></select>
+    <div class="btn-row">
+      <button type="button" id="btn-task-clear">解除</button>
+      <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
+    </div>
+    <div id="task-objectives"></div>
+  </div>
+
+  <div>
+    <label>ピン（タスクの目的地など）</label>
+    <div class="pin-tools">
+      <button type="button" id="btn-place" class="pin-toggle" aria-pressed="false"
+              title="オンにすると、地図をクリックするたびにピンが刺さります">
+        <span class="glyph" aria-hidden="true"></span>
+        <span class="txt">ピンを置く</span>
+      </button>
+      <button type="button" id="btn-pins-clear">すべて消す</button>
+    </div>
+    <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
+    <div id="pins"></div>
   </div>
 
   <div>
@@ -399,35 +433,6 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
       </div>
     </form>
   </div>
-
-  <div><div id="status" class="status idle">待機中</div></div>
-
-  <div>
-    <label for="task-select">タスクの目標地点</label>
-    <input type="search" id="task-filter" placeholder="タスク名・トレーダー・目標で絞り込む" autocomplete="off">
-    <select id="task-select" style="margin-top:8px"></select>
-    <div class="btn-row">
-      <button type="button" id="btn-task-clear">解除</button>
-      <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
-    </div>
-    <div id="task-objectives"></div>
-  </div>
-
-  <div>
-    <label>ピン（タスクの目的地など）</label>
-    <div class="pin-tools">
-      <button type="button" id="btn-place" class="pin-toggle" aria-pressed="false"
-              title="オンにすると、地図をクリックするたびにピンが刺さります">
-        <span class="glyph" aria-hidden="true"></span>
-        <span class="txt">ピンを置く</span>
-      </button>
-      <button type="button" id="btn-pins-clear">すべて消す</button>
-    </div>
-    <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
-    <div id="pins"></div>
-  </div>
-
-  <div id="sample"><div class="hint">ファイル名を貼り付けるか、座標を入力してください。</div></div>
 
   <div id="clock">
     <label style="margin:0">ワールド時計</label>
