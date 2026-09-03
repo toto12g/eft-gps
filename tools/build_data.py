@@ -900,6 +900,9 @@ def build():
     print(f"  data/poi.bin     {len(blob):>8,} bytes", file=sys.stderr)
     print(f"  data/mapdb.json  {(DATA / 'mapdb.json').stat().st_size:>8,} bytes", file=sys.stderr)
     print(file=sys.stderr)
+    write_readme_summary(db, task_counts, landmark_counts)
+    bump_service_worker(db["builtAt"])
+
     print(f"  {'map':<20} {'points':>7}  {'svg':<20} {'POI in view':>11} {'fill':>6} {'letterbox':>9}", file=sys.stderr)
     for e in maps_out:
         c = e["calib"]
@@ -914,6 +917,72 @@ def build():
             f"{(e['svg'] or '-').replace('maps/', ''):<20} {stat}",
             file=sys.stderr,
         )
+
+
+def write_readme_summary(db: dict, task_counts: dict, landmark_counts: dict):
+    """README の数値を書き換える。手で同期すると必ずずれるので機械にやらせる。"""
+    readme = ROOT / "README.md"
+    if not readme.exists():
+        return
+    text = readme.read_text(encoding="utf-8")
+    begin, end = "<!-- data:begin -->", "<!-- data:end -->"
+    if begin not in text or end not in text:
+        return
+
+    maps = db["maps"]
+    with_map = [m for m in maps if m.get("svg")]
+    task_total = sum(task_counts.values())
+    any_tasks = task_counts.get(ANY_MAP, 0)
+    lm_total = sum(sum(c.values()) for c in landmark_counts.values())
+
+    def size(rel):
+        p = ROOT / rel
+        return p.stat().st_size if p.exists() else 0
+
+    def dirsize(rel):
+        p = ROOT / rel
+        return sum(f.stat().st_size for f in p.glob("*.json")) if p.is_dir() else 0
+
+    rows = [
+        ("マップ", f"{len(maps)}（地図画像あり {len(with_map)}）", ""),
+        ("POI", f"{db['poiTotal']:,} 点", f"data/poi.bin {size('data/poi.bin'):,} B"),
+        ("脱出口", f"{sum(len(m.get('extracts') or []) for m in maps)} 箇所", ""),
+        ("タスク", f"延べ {task_total} 件（うちマップ非依存 {any_tasks}）",
+         f"data/tasks/ {dirsize('data/tasks'):,} B"),
+        ("名前の付いた地点", f"{lm_total} 件", f"data/landmarks/ {dirsize('data/landmarks'):,} B"),
+        ("メタデータ", "", f"data/mapdb.json {size('data/mapdb.json'):,} B"),
+    ]
+    table = ["| | | |", "|---|---|---|"]
+    table += [f"| {a} | {b} | {c} |" for a, b, c in rows]
+    table.append("")
+    table.append(f"生成 {db['builtAt']} / スキーマ v{db['version']}")
+
+    body = "\n".join(table)
+    text = re.sub(
+        re.escape(begin) + r".*?" + re.escape(end),
+        begin + "\n" + body + "\n" + end,
+        text,
+        flags=re.S,
+    )
+    readme.write_text(text, encoding="utf-8")
+    print("  README の数値を更新", file=sys.stderr)
+
+
+def bump_service_worker(built_at: str):
+    """sw.js の VERSION をビルド時刻にする。
+
+    手で上げる運用だと上げ忘れる。上げ忘れると、インストール時に
+    先読みした古い一式がオフラインで残り続ける。
+    """
+    sw = ROOT / "sw.js"
+    if not sw.exists():
+        return
+    text = sw.read_text(encoding="utf-8")
+    stamp = "eft-gps-" + built_at.replace("-", "").replace(":", "").replace(" ", "-")
+    new = re.sub(r"const VERSION = '[^']*';", f"const VERSION = '{stamp}';", text, count=1)
+    if new != text:
+        sw.write_text(new, encoding="utf-8")
+        print(f"  sw.js の VERSION を {stamp} に更新", file=sys.stderr)
 
 
 if __name__ == "__main__":

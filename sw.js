@@ -13,7 +13,7 @@
  * 資産は 2MB ほどしかないので、この方式でも体感は変わらない。
  */
 
-const VERSION = 'eft-gps-v5';
+const VERSION = 'eft-gps-20260904-0530';
 
 /** 最初に取り込んでおくもの。ここに無いものも、一度読めばキャッシュに入る。 */
 const PRECACHE = [
@@ -34,6 +34,10 @@ const PRECACHE = [
   './src/verify/index.js',
   './src/watch/index.js',
   './src/watch/idb.js',
+  './src/app/tasks.js',
+  './src/app/landmarks.js',
+  './src/app/pins.js',
+  './src/app/calibrate.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
@@ -48,9 +52,12 @@ self.addEventListener('install', (event) => {
       // マップが増えたときに更新し忘れるので、mapdb から拾う。
       try {
         const db = await cache.match('./data/mapdb.json').then((r) => r && r.json());
-        const files = (db?.maps || [])
-          .flatMap((m) => [m.taskFile, m.landmarkFile])
-          .filter(Boolean);
+        // 地図の SVG もここで入れる。入れないとインストール直後に
+        // オフラインへ行ったとき、地図が 1 枚も出ない。
+        const files = [
+          ...(db?.maps || []).flatMap((m) => [m.taskFile, m.landmarkFile, m.svg]),
+          db?.anyTaskFile,
+        ].filter(Boolean);
         await Promise.all(files.map((f) => cache.add('./' + f).catch(() => {})));
       } catch {
         /* 取れなくても本体は動く。使うときに取りに行く */
