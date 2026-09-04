@@ -53,6 +53,8 @@ export class MapView {
     this.extractLayer = null;
     this.playerLayer = null;
     this.trailLayer = null;
+    /** 通った跡の線を出すか。点は出さない設定でも貯め続ける */
+    this.showTrail = true;
     this.mapData = null;
     this.svgElement = null;
     this.trail = [];
@@ -290,16 +292,7 @@ export class MapView {
 
     this.trail.push(latlng);
     if (this.trail.length > 60) this.trail.shift();
-    if (this.trailLayer) this.trailLayer.remove();
-    if (this.trail.length > 1) {
-      this.trailLayer = L.polyline(this.trail, {
-        color: '#22e0ff',
-        weight: 2,
-        opacity: 0.5,
-        dashArray: '4 5',
-        interactive: false,
-      }).addTo(this.map);
-    }
+    this.drawTrail();
     // 画面外に出たときだけ追従する。毎回中央に寄せると、全体が見えている
     // 状態からいきなり地図が画面外へ押し出されて位置関係が分からなくなる。
     if (!this.map.getBounds().pad(-0.15).contains(latlng)) {
@@ -626,6 +619,36 @@ export class MapView {
   /** SVG 上の座標を返す (デバッグ・診断用)。 */
   project(x, z) {
     return applyAffine(this.mapData.affine, x, z);
+  }
+
+  /**
+   * 通った跡の線を引き直す。
+   * 点は showTrail に関わらず貯め続けるので、途中でオンにしても
+   * それまでの道のりがそのまま出る。
+   */
+  drawTrail() {
+    if (this.trailLayer) {
+      this.trailLayer.remove();
+      this.trailLayer = null;
+    }
+    if (!this.showTrail || this.trail.length < 2) return;
+    this.trailLayer = this.L.polyline(this.trail, {
+      color: '#22e0ff',
+      weight: 2,
+      opacity: 0.5,
+      dashArray: '4 5',
+      interactive: false,
+    }).addTo(this.map);
+  }
+
+  /**
+   * 線を出すかどうか。
+   * 消えるのは線だけで、マップ判定の材料には触らない
+   * （「軌跡を消す」ボタンのほうは累積もまとめて捨てる）。
+   */
+  setTrailVisible(on) {
+    this.showTrail = !!on;
+    this.drawTrail();
   }
 
   clearTrail() {

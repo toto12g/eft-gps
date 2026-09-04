@@ -138,6 +138,18 @@ async function boot() {
     ev.preventDefault();
     handleInput($('input-text').value);
   });
+  // 通った跡の線。切っても貯めた点は残すので、また入れれば道のりが戻る。
+  // マップ判定の材料には触らない（「軌跡を消す」はそちらも捨てる）
+  const trail = $('trail-toggle');
+  trail.checked = localStorage.getItem('eft-gps.trail') !== '0';
+  state.view.setTrailVisible(trail.checked);
+  trail.addEventListener('change', () => {
+    state.view.setTrailVisible(trail.checked);
+    try {
+      localStorage.setItem('eft-gps.trail', trail.checked ? '1' : '0');
+    } catch { /* 保存できなくても動作には影響しない */ }
+  });
+
   $('btn-clear').addEventListener('click', () => {
     state.view.clearTrail();
     state.tracker.reset();
