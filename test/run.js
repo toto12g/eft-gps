@@ -1241,6 +1241,47 @@ await check('目標の種類に日本語表示がある', () => {
 /* --------------------------------------------------------------------- T25 */
 
 group('T25 現在地が地図の外に描かれる不具合（報告された不具合）');
+await check('切替の根拠が「累積」か「1 枚」かを区別している', () => {
+  // 1 枚だけの提案で地図を動かすと、レイド 1 本あたり 3.8%（Customs は 10%）
+  // が誤って飛ばされた。根拠を verdict に持たせ、1 枚のときは
+  // 次の 1 枚の裏づけを待てるようにする。
+  const s = parseScreenshotName(RAID1); // streets の座標
+  const single = validateSample({ sample: s, selectedKey: 'customs', db, fileModifiedMs: MTIME.raid1 });
+  eq(single.verdict, VERDICT.WRONG_MAP, '別マップと判定されるはず');
+  eq(single.via, 'single', '1 枚だけの根拠であることが分かる必要がある');
+  eq(single.suggest, 'streets-of-tarkov', '提案先');
+
+  // 累積が効いていれば consensus になる
+  const t = new MapTracker();
+  for (const f of WOODS_RAID.slice(0, 8)) t.add(parseScreenshotName(f), db, Date.now());
+  const many = validateSample({
+    sample: parseScreenshotName(WOODS_RAID[8]), selectedKey: 'customs', db,
+    fileModifiedMs: null, tracker: t,
+  });
+  eq(many.verdict, VERDICT.WRONG_MAP, '累積でも別マップ');
+  eq(many.via, 'consensus', '累積が根拠であることが分かる必要がある');
+  return `1 枚 → via=single / 累積 8 枚 → via=consensus`;
+});
+
+await check('実レイド 3 本で、1 枚だけの誤った提案が起きない', () => {
+  // 裏づけ待ちにしたことで、正しい切替まで遅れていないかの確認。
+  // 各レイドを頭から流し、途中で別マップを指した回数を数える
+  const out = [];
+  for (const [name, raid] of [['woods', WOODS_RAID], ['customs', CUSTOMS_RAID], ['interchange', INTERCHANGE_RAID]]) {
+    const t = new MapTracker();
+    let single = 0, consensus = 0;
+    raid.forEach((f, i) => {
+      const smp = parseScreenshotName(f);
+      t.add(smp, db, 1788000000000 + i * 60000);
+      const v = validateSample({ sample: smp, selectedKey: name, db, fileModifiedMs: null, tracker: t });
+      if (v.verdict === VERDICT.WRONG_MAP) (v.via === 'consensus' ? consensus++ : single++);
+    });
+    eq(single + consensus, 0, `${name} で別マップ判定が出た（single ${single} / consensus ${consensus}）`);
+    out.push(`${name} ${raid.length}枚`);
+  }
+  return `${out.join(' / ')} すべて誤判定なし`;
+});
+
 
 // RAID1 と同じゲーム内時刻（= MTIME.raid1 と一致する）で、座標だけ差し替える
 const withPos = (x, y, z) => RAID1.replace(/_[-\d.]+, [-\d.]+, [-\d.]+_/, `_${x}, ${y}, ${z}_`);

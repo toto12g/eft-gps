@@ -344,6 +344,8 @@ export function validateSample({
       ...base,
       suggest: consensus.best,
       verdict: VERDICT.WRONG_MAP,
+      // 複数枚の平均が根拠。1 枚の偶然では動かないので、そのまま切り替えてよい
+      via: 'consensus',
       reason:
         `直近 ${consensus.n} 枚の平均で ${consensus.best} (${consensus.mean.toFixed(1)}m, ` +
         `2位/1位 = ${consensus.ratio.toFixed(2)})`,
@@ -355,6 +357,9 @@ export function validateSample({
     return {
       ...base,
       verdict: VERDICT.WRONG_MAP,
+      // 1 枚だけが根拠。マップ同士の座標系は重なっているので、
+      // これだけで切り替えると誤爆する（実測でレイドの 3.8%）
+      via: 'single',
       reason: `${best} の座標に見える (${d1.toFixed(2)}m, 2位/1位 = ${ratio.toFixed(1)})`,
     };
   }
@@ -389,6 +394,7 @@ export function validateSample({
     return {
       ...base,
       verdict: VERDICT.WRONG_MAP,
+      via: 'single',
       reason:
         `レイド中だが ${selectedKey} の範囲外 ` +
         `(最寄り ${best} ${d1.toFixed(1)}m)`,

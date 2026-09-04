@@ -263,6 +263,15 @@ body.side-collapsed #btn-side-show { display: block; }
   text-overflow: ellipsis; font: 600 11px/1.4 var(--mono); color: #cdb4ff;
   text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
 }
+/* 「拾う場所」の候補地点。確定のゾーンとは見た目を分けて、
+   1 箇所に決まっていないことが分かるようにする */
+.task-spot .num {
+  width: 16px; height: 16px; left: -8px; top: -8px;
+  background: rgba(20,16,31,.85); color: #cdb4ff;
+  border: 2px dashed #b48cff; font-size: 10px; line-height: 12px;
+  box-shadow: 0 0 5px rgba(180,140,255,.45);
+}
+
 /* 持ち物 */
 #task-loadout { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
 #task-loadout:empty { display: none; }

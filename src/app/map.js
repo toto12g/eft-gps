@@ -406,11 +406,29 @@ export class MapView {
         });
       }
 
-      for (const s of spots) {
-        L.circleMarker(worldToLatLng(aff, s[0], s[2]), {
-          radius: 4, color: COLOR, weight: 2, fillOpacity: 0.5, interactive: false,
+      // 「拾う場所」の候補地点。ゾーンを持たず候補地点だけの目標が
+      // 全マップで 27 タスクあり、半径 4px の無地の円だけでは
+      // 「選んでも何も出ない」ようにしか見えなかった。
+      // ゾーンと同じ番号を振り、ホバーで説明が読めるようにする。
+      spots.forEach((s, n) => {
+        const marker = L.marker(worldToLatLng(aff, s[0], s[2]), {
+          icon: L.divIcon({
+            className: 'task-icon task-spot',
+            html:
+              `<span class="num">${i + 1}</span>` +
+              (spots.length <= 2 ? `<span class="label">${escapeHtml(objective.d || '')}</span>` : ''),
+            iconSize: [0, 0],
+          }),
+          zIndexOffset: 690,
         }).addTo(this.taskLayer);
-      }
+        marker.bindTooltip(
+          `${escapeHtml(label)}<br>候補地点 ${n + 1} / ${spots.length}`,
+        );
+        marker.on('click', (ev) => {
+          if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+          onPick(i);
+        });
+      });
     });
   }
 
@@ -534,6 +552,26 @@ export class MapView {
       interactive: true,
     }).addTo(this.map);
     this.hintLayer.bindTooltip(`このマップで最も近い既知の地点（${point.d.toFixed(0)} m）`);
+  }
+
+  /**
+   * 与えた地点が全部入るように寄る。
+   *
+   * タスクを選んでも視点は動かないままだったので、地図の別の場所を
+   * 拡大していると「選んでも何も出ない」ように見えていた。
+   * @param {{x:number,z:number}[]} points
+   */
+  fitWorldPoints(points) {
+    if (!this.mapData || !this.mapData.affine || !points || !points.length) return false;
+    const aff = this.mapData.affine;
+    const lls = points.map((p) => worldToLatLng(aff, p.x, p.z));
+    if (points.length === 1) {
+      this.map.setView(lls[0], Math.max(this.map.getZoom(), 1), { animate: true });
+      return true;
+    }
+    // 1 点だけ極端に離れていても全部入れる。padding は画面端に貼り付かせないため
+    this.map.fitBounds(this.L.latLngBounds(lls), { padding: [60, 60], maxZoom: 2, animate: true });
+    return true;
   }
 
   /** 指定のワールド座標へ寄る。 */

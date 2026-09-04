@@ -18,7 +18,7 @@ import { MapView } from './map.js';
 import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
 import {
   loadTasks, filterTasks, taskLabel, objectiveGeometry, objectiveApplies,
-  taskKeyDoors, taskLoadout, OBJECTIVE_TYPE,
+  taskKeyDoors, taskLoadout, taskPoints, OBJECTIVE_TYPE,
 } from './tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from './landmarks.js';
 
@@ -101,6 +101,8 @@ const state = {
   measuring: false,
   received: 0,
   skipped: 0,
+  /** 直前の 1 枚が提案した切替先。2 枚続けて同じことを言うまで動かさない */
+  pendingSwitch: null,
   /** 書き出し用の記録。1 レイド分だけ持つ（増え続けないよう上限つき） */
   log: [],
 };
@@ -419,11 +421,12 @@ function renderTaskOptions() {
   const none = document.createElement('option');
   none.value = '';
   const m = state.db.byKey.get(state.selectedKey);
+  const placed = state.tasks.filter((t) => taskPoints(t, state.selectedKey).length).length;
   const doneHere = state.tasks.filter((t) => state.doneTasks.has(t.id)).length;
   none.textContent = state.tasks.length
-    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件`
+    ? `— 選択なし（${shown.length} / ${state.tasks.length} 件、◎ 地点あり ${placed} 件`
       + (doneHere ? `、終了 ${doneHere}${hidden ? ' を非表示' : ''}` : '')
-      + `、〈任意〉は全マップ共通）—`
+      + `）—`
     : state.tasks.failed
       ? `— タスクデータを読めませんでした（${state.tasks.failed}）—`
       : m && m.taskFile === undefined
@@ -433,7 +436,11 @@ function renderTaskOptions() {
   for (const t of shown) {
     const opt = document.createElement('option');
     opt.value = t.id;
-    opt.textContent = (state.doneTasks.has(t.id) ? '✓ ' : '') + taskLabel(t);
+    // 一覧 243 件のうち地点を持つのは Customs で 41 件しかない。
+    // 選んでから「何も出ない」と気づくより、選ぶ前に分かるほうがよい
+    const hasPlace = taskPoints(t, state.selectedKey).length > 0;
+    opt.textContent =
+      (state.doneTasks.has(t.id) ? '✓ ' : '') + (hasPlace ? '◎ ' : '　') + taskLabel(t);
     sel.appendChild(opt);
   }
   sel.disabled = !state.tasks.length;
@@ -459,6 +466,29 @@ function selectTask(id) {
   state.view.setTask(state.activeTask, state.selectedKey, focusObjective, doors);
   renderLoadout(doors);
   renderObjectives();
+
+  // 選んだ地点が入るように視点を寄せる。
+  // 動かさないままだと、地図の別の場所を拡大しているときに
+  // 「選んでも何も出ない」ようにしか見えなかった。
+  if (!state.activeTask) return;
+  const pts = taskPoints(state.activeTask, state.selectedKey);
+  if (pts.length) {
+    state.view.fitWorldPoints(pts);
+    return;
+  }
+  // 地点が無いなら、その理由を出す。黙って何も起きないのがいちばん困る
+  const doorPts = doors.flatMap(({ locks }) => locks.map((l) => ({ x: l.p[0], z: l.p[2] })));
+  if (doorPts.length) {
+    state.view.fitWorldPoints(doorPts);
+    setStatus(`「${state.activeTask.n}」は地点データがありません（鍵の扉だけ表示）`, 'low');
+    return;
+  }
+  setStatus(
+    state.activeTask.any
+      ? `「${state.activeTask.n}」はマップ指定のないタスクです（地点データなし）`
+      : `「${state.activeTask.n}」は ${state.selectedKey} の地点データがありません`,
+    'low',
+  );
 }
 
 /** 目標 i の地点へ地図を寄せる。 */
@@ -980,14 +1010,32 @@ async function applySample(sample, fileModifiedMs, live) {
     tracker: state.tracker,
   });
 
-  // 累積で別マップと定まったとき、設定されていれば自動で合わせる。
+  // 別マップと判定されたとき、設定されていれば自動で合わせる。
+  //
+  // ただし 1 枚だけを根拠にした提案では動かさない。マップ同士の座標系は
+  // 大きく重なっていて（customs の点の 47% が streets の点から 20m 以内）、
+  // 1 枚が偶然よそのマップに近いことがある。実測では 1 枚で切り替えると
+  // レイド 1 本(12 枚)あたり 3.8%、Customs では 10% が誤って飛ばされた。
+  // 2 枚続けて同じマップを指したときだけ動かすと、660 本の試行で 0 件になる。
   if (verdict.verdict === VERDICT.WRONG_MAP && state.autoSwitch) {
-    // 地図の読み込みを待ってから描く。待たずに進むと、切り替え途中の
-    // レイヤ掃除でマーカーが消えることがある。
-    await selectMap(verdict.suggest);
-    verdict = validateSample({
-      sample, selectedKey: verdict.suggest, db: state.db, fileModifiedMs, tracker: state.tracker,
-    });
+    const corroborated = verdict.via === 'consensus' || state.pendingSwitch === verdict.suggest;
+    if (corroborated) {
+      state.pendingSwitch = null;
+      // 地図の読み込みを待ってから描く。待たずに進むと、切り替え途中の
+      // レイヤ掃除でマーカーが消えることがある。
+      await selectMap(verdict.suggest);
+      verdict = validateSample({
+        sample, selectedKey: verdict.suggest, db: state.db, fileModifiedMs, tracker: state.tracker,
+      });
+    } else {
+      state.pendingSwitch = verdict.suggest;
+      setStatus(
+        `${verdict.suggest} の座標かもしれません。次の 1 枚で同じなら切り替えます`,
+        'low',
+      );
+    }
+  } else if (verdict.verdict !== VERDICT.NOT_IN_RAID) {
+    state.pendingSwitch = null;
   }
 
   if (verdict.verdict === VERDICT.NOT_IN_RAID) {
