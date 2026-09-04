@@ -252,24 +252,26 @@ body.side-collapsed #btn-side-show { display: block; }
 
 /* タスク */
 .task-icon > span { position: absolute; }
+/* 目標の印。小さくて見つけにくいという指摘を受けて 20px → 28px にした。
+   レイド中にちらっと見て分かる必要があるので、脱出口より一回り大きい */
 .task-icon .num {
-  left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 50%;
-  background: #b48cff; color: #14101f; border: 2px solid #0a0c0d;
-  font: 700 11px/17px var(--mono); text-align: center;
-  box-shadow: 0 0 7px rgba(180,140,255,.7);
+  left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%;
+  background: #b48cff; color: #14101f; border: 3px solid #0a0c0d;
+  font: 700 14px/23px var(--mono); text-align: center;
+  box-shadow: 0 0 10px rgba(180,140,255,.8), 0 0 3px rgba(0,0,0,.9);
 }
 .task-icon .label {
-  left: 14px; top: -9px; max-width: 260px; white-space: nowrap; overflow: hidden;
+  left: 18px; top: -8px; max-width: 260px; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; font: 600 11px/1.4 var(--mono); color: #cdb4ff;
   text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
 }
 /* 「拾う場所」の候補地点。確定のゾーンとは見た目を分けて、
    1 箇所に決まっていないことが分かるようにする */
 .task-spot .num {
-  width: 16px; height: 16px; left: -8px; top: -8px;
-  background: rgba(20,16,31,.85); color: #cdb4ff;
-  border: 2px dashed #b48cff; font-size: 10px; line-height: 12px;
-  box-shadow: 0 0 5px rgba(180,140,255,.45);
+  width: 24px; height: 24px; left: -12px; top: -12px;
+  background: rgba(20,16,31,.88); color: #cdb4ff;
+  border: 3px dashed #b48cff; font-size: 12px; line-height: 19px;
+  box-shadow: 0 0 8px rgba(180,140,255,.55), 0 0 3px rgba(0,0,0,.9);
 }
 
 /* 持ち物 */
@@ -296,10 +298,11 @@ body.side-collapsed #btn-side-show { display: block; }
 
 /* タスクの鍵で開く扉 */
 .task-door > span { position: absolute; }
-.task-door .mark { left: -6px; top: -6px; width: 12px; height: 12px;
-                   background: #9aa7b8; border: 2px solid #0a0c0d; border-radius: 2px;
-                   box-shadow: 0 0 7px rgba(154,167,184,.8); }
-.task-door .label { left: 11px; top: -7px; white-space: nowrap;
+/* 鍵で開く扉。目標の印と並んで出るので、同じ比率で大きくする */
+.task-door .mark { left: -9px; top: -9px; width: 18px; height: 18px;
+                   background: #9aa7b8; border: 3px solid #0a0c0d; border-radius: 3px;
+                   box-shadow: 0 0 9px rgba(154,167,184,.85); }
+.task-door .label { left: 15px; top: -7px; white-space: nowrap;
                     font: 600 11px/1.4 var(--mono); color: #c4cedb;
                     text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d; }
 
