@@ -216,6 +216,8 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
         key_name = load_item_names(refresh, wanted)
 
     out = {}
+    # 統合したシーン間で同じ湧き位置が二重に入るのを防ぐ
+    SPAWN_SEEN = {}
 
     def bucket(map_key, kind):
         return out.setdefault(map_key, {}).setdefault(kind, [])
@@ -275,25 +277,42 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
             })
 
         # 湧き位置。3000 点あるので 25m 格子で間引き、陣営ごとにまとめる
-        seen_spawn = set()
+        # プレイヤーの湧き位置。
+        #
+        # categories に "player" があるものだけを出す。bot / botpmc /
+        # boss / sniper は AI 用の湧きなので、プレイヤーの湧きではない。
+        #
+        # sides は上流のデータどおりに扱い、推測で寄せない:
+        #   pmc  … PMC 専用
+        #   scav … スカブ専用
+        #   all  … PMC・スカブ共通（factory / lighthouse / reserve /
+        #          streets / ground-zero / the-lab はこの形しか持たない）
+        #
+        # 間引きはしない。湧き位置は「だいたいこの辺」では意味が無く、
+        # 20m ずれれば別の建物になる。代わりに、夜や別バージョンのシーンを
+        # 統合したことで生じる完全な重複だけを落とす
+        # （night-factory は factory と 117 点すべてが同一座標）。
         for sp in m.get("spawns") or []:
-            p = sp.get("position")
-            if not p:
-                continue
-            cats = sp.get("categories") or []
-            if "player" not in cats:
+            pos = sp.get("position")
+            if not pos or "player" not in (sp.get("categories") or []):
                 continue
             sides = sp.get("sides") or []
             side = "pmc" if "pmc" in sides else "scav" if "scav" in sides else "all"
-            cell = (side, round(p["x"] / 25), round(p["z"] / 25))
-            if cell in seen_spawn:
+            xyz = pos3(pos)
+            seen = SPAWN_SEEN.setdefault(k, set())
+            token = (side, xyz[0], xyz[1], xyz[2])
+            if token in seen:
                 continue
-            seen_spawn.add(cell)
-            bucket(k, "spawn").append({
-                "n": {"pmc": "PMC 湧き", "scav": "スカブ湧き"}.get(side, "湧き"),
+            seen.add(token)
+            kind = {"pmc": "spawnPmc", "scav": "spawnScav"}.get(side, "spawnBoth")
+            bucket(k, kind).append({
+                "n": {
+                    "pmc": "PMC 湧き",
+                    "scav": "スカブ湧き",
+                }.get(side, "PMC・スカブ共通の湧き"),
                 # "s" は label が文字サイズに使っているので別名にする
                 "sd": side,
-                "p": pos3(p),
+                "p": xyz,
             })
 
         for b in m.get("bosses") or []:

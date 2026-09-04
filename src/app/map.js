@@ -10,6 +10,7 @@
  * Leaflet は vendor/leaflet からグローバル L として読み込まれている前提。
  */
 
+import { SIDE_COLOR, layerKeys } from './landmarks.js';
 import { applyAffine, worldToLatLng, latLngToWorld, headingToScreenDeg, bearingDeg } from '../geo/index.js';
 
 /** 陣営ごとの色。地図の配色 (青緑・灰・カーキ) から浮くものを選んでいる。 */
@@ -449,24 +450,34 @@ export class MapView {
     const group = L.layerGroup();
     let drawn = 0;
 
+    // 同じ点を 2 つのボタンが共有することがある（PMC・スカブ共通の湧き）。
+    // 両方オンのときに二重に描かないよう、描いた点を覚えておく
+    const placed = new Set();
+
     for (const def of layers) {
       if (!enabled.has(def.id)) continue;
-      for (const item of data[def.id] || []) {
+      const items = layerKeys(def).flatMap((key) => data[key] || []);
+      for (const item of items) {
+        if (placed.has(item)) continue;
+        placed.add(item);
         const text = labelOf(item, def.id);
         const latlng = worldToLatLng(aff, item.p[0], item.p[2]);
+        // 点そのものが陣営を持つなら、そちらの色を使う。
+        // インラインの --c は CSS のクラスより強いので、ここで決める必要がある
+        const color = (item.sd && SIDE_COLOR[item.sd]) || def.color;
 
         // 範囲を持つもの（危険地帯）は面でも描く
         if ((item.o || []).length >= 3) {
           L.polygon(item.o.map((v) => worldToLatLng(aff, v[0], v[1])), {
-            color: def.color, weight: 1.5, fillOpacity: 0.18, interactive: false,
+            color, weight: 1.5, fillOpacity: 0.18, interactive: false,
           }).addTo(group);
         }
 
         const html =
           def.shape === 'text'
-            ? `<span class="lm-text" style="--c:${def.color}">${escapeHtml(text)}</span>`
-            : `<span class="lm-mark lm-${def.shape}" style="--c:${def.color}"></span>` +
-              `<span class="lm-label" style="--c:${def.color}">${escapeHtml(text)}</span>`;
+            ? `<span class="lm-text" style="--c:${color}">${escapeHtml(text)}</span>`
+            : `<span class="lm-mark lm-${def.shape}" style="--c:${color}"></span>` +
+              `<span class="lm-label" style="--c:${color}">${escapeHtml(text)}</span>`;
 
         const marker = L.marker(latlng, {
           icon: L.divIcon({

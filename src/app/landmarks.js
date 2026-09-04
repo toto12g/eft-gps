@@ -12,6 +12,11 @@ const cache = new Map();
 
 /**
  * 表示の種類。順番はそのまま UI の並びになる。
+ *
+ * keys を持つものは、データ側の複数のキーをまとめて 1 つのボタンで扱う。
+ * 湧きは上流が「PMC 専用 / スカブ専用 / 両方が使える」の 3 種類を持つので、
+ * 「両方が使える」点は PMC・スカブどちらのボタンでも出るようにしている。
+ * どちらか片方に寄せて表示するのは、上流が言っていないことになるため。
  * color は地図の配色・脱出口（緑/橙/黄）・ピン（琥珀）・タスク（紫）・現在地（シアン）
  * のいずれとも衝突しないものを選んでいる。
  */
@@ -19,7 +24,12 @@ export const LAYERS = [
   { id: 'label',   name: '地名',     color: '#d7dedc', shape: 'text',    hint: 'Big Red, Dorms, Sawmill など' },
   { id: 'hazard',  name: '危険地帯', color: '#e5484d', shape: 'area',    hint: '地雷原・狙撃ゾーン' },
   { id: 'artillery', name: '砲撃',   color: '#ff8a3d', shape: 'area',    hint: '砲撃が落ちる範囲' },
-  { id: 'spawn',   name: '湧き',     color: '#8fd6ff', shape: 'circle',  hint: 'プレイヤーの湧き位置（25m 間引き）' },
+  { id: 'spawnPmc',  name: 'PMC 湧き', color: '#ff9db0', shape: 'circle',
+    keys: ['spawnPmc', 'spawnBoth'],
+    hint: 'PMC 専用と、スカブと共通の湧き位置' },
+  { id: 'spawnScav', name: 'スカブ湧き', color: '#8fd6ff', shape: 'circle',
+    keys: ['spawnScav', 'spawnBoth'],
+    hint: 'スカブ専用と、PMC と共通の湧き位置' },
   { id: 'lock',    name: '施錠扉',   color: '#9aa7b8', shape: 'square',  hint: '必要な鍵の名前つき' },
   { id: 'switch',  name: 'スイッチ', color: '#ffe066', shape: 'diamond', hint: '電源・扉の操作盤' },
   { id: 'transit', name: '乗り換え', color: '#4ea3ff', shape: 'triangle', hint: '他マップへの移動口' },
@@ -29,6 +39,25 @@ export const LAYERS = [
 ];
 
 export const DEFAULT_ENABLED = ['label'];
+
+/**
+ * 湧きの陣営ごとの色。
+ *
+ * PMC・スカブ共通の点は両方のボタンで出るので、どちらのボタンで出したかで
+ * 色が変わってしまわないよう、点そのものが持つ陣営で色を決める。
+ */
+export const SIDE_COLOR = { pmc: '#ff9db0', scav: '#8fd6ff', all: '#8ef0a6' };
+
+/** そのレイヤがデータ側で使うキー。 */
+export function layerKeys(def) {
+  return def.keys || [def.id];
+}
+
+/** そのレイヤが持つ地点の数。keys をまとめて数える。 */
+export function layerCount(def, data) {
+  if (!data) return 0;
+  return layerKeys(def).reduce((n, key) => n + ((data[key] || []).length), 0);
+}
 
 /**
  * @param {string} mapKey

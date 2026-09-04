@@ -145,9 +145,12 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
   color: #ffe066; text-shadow: 0 0 3px #0a0c0d, 0 0 3px #0a0c0d;
 }
 
-.lm-kind-spawn .lm-mark { width: 6px; height: 6px; opacity: .75; }
-.lm-side-pmc .lm-mark { --c: #ff9db0; }
-.lm-side-scav .lm-mark { --c: #8fd6ff; }
+/* 湧き。陣営を色で分ける。PMC・スカブ共通の点は
+   どちらのボタンでも出るので、第三の色にして区別できるようにする */
+.lm-kind-spawnPmc .lm-mark,
+.lm-kind-spawnScav .lm-mark { width: 9px; height: 9px; opacity: .9; }
+/* 色は JS 側 (SIDE_COLOR) が点ごとに決める。インラインの --c のほうが
+   強いので、ここで色を書いても効かない。大きさだけを扱う */
 
 /* サイドバーの折りたたみ。狭い画面では地図がほとんど残らない */
 body.side-collapsed { grid-template-columns: 0 1fr; }

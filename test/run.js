@@ -1091,7 +1091,8 @@ await check('レイヤ定義が一貫している', () => {
 });
 
 await check('データにあるすべての種類が UI で出せる', () => {
-  const known = new Set(LAYERS.map((d) => d.id));
+  // keys を持つレイヤは、その keys もそのボタンで出せる種類として数える
+  const known = new Set(LAYERS.flatMap((d) => [d.id, ...(d.keys || [])]));
   const missing = new Set();
   for (const m of db.maps) {
     for (const kind of Object.keys(m.landmarkCounts || {})) {
@@ -1437,27 +1438,90 @@ await check('スイッチが要る脱出口に印が付いている', () => {
   return `${marked.length} 件（例: ${marked.slice(0, 3).join(', ')}）`;
 });
 
-await check('湧きと砲撃のレイヤが用意されている', async () => {
+await check('湧きが PMC とスカブで別のボタンになっている', async () => {
   const ids = LAYERS.map((l) => l.id);
-  truthy(ids.includes('spawn'), '湧きレイヤが無い');
+  truthy(ids.includes('spawnPmc'), 'PMC の湧きレイヤが無い');
+  truthy(ids.includes('spawnScav'), 'スカブの湧きレイヤが無い');
   truthy(ids.includes('artillery'), '砲撃レイヤが無い');
-  truthy(!DEFAULT_ENABLED.includes('spawn'), '湧きが既定でオンだと地図が埋まる');
+  for (const id of ['spawnPmc', 'spawnScav']) {
+    truthy(!DEFAULT_ENABLED.includes(id), `${id} が既定でオンだと地図が埋まる`);
+  }
+  // 「両方が使える」湧きは、どちらのボタンでも出る必要がある。
+  // 片方に寄せると、上流が言っていないことを言うことになる
+  for (const id of ['spawnPmc', 'spawnScav']) {
+    const def = LAYERS.find((l) => l.id === id);
+    truthy((def.keys || []).includes('spawnBoth'), `${id} が共通の湧きを拾っていない`);
+  }
   const lm = await loadLandmarks('customs', '../' + db.byKey.get('customs').landmarkFile);
-  truthy((lm.spawn || []).length >= 50, `customs の湧きが少ない: ${(lm.spawn || []).length}`);
+  truthy((lm.spawnPmc || []).length >= 100, `customs の PMC 湧きが少ない: ${(lm.spawnPmc || []).length}`);
+  truthy((lm.spawnScav || []).length >= 100, `customs のスカブ湧きが少ない: ${(lm.spawnScav || []).length}`);
   truthy((lm.artillery || []).length >= 1, 'customs の砲撃ゾーンが無い');
-  return `customs 湧き ${lm.spawn.length} / 砲撃 ${lm.artillery.length}`;
+  return `customs PMC ${lm.spawnPmc.length} / スカブ ${lm.spawnScav.length} / 砲撃 ${lm.artillery.length}`;
 });
 
-await check('湧きが 25m 格子で間引かれ、陣営が残っている', async () => {
-  const lm = await loadLandmarks('woods', '../' + db.byKey.get('woods').landmarkFile);
-  const sides = new Set((lm.spawn || []).map((s) => s.sd));
-  truthy(sides.size >= 2, `陣営が 1 種類しかない: ${[...sides].join(',')}`);
-  // 格子の切り方を JS 側で再現すると、Python の round との差で
-  // 境界の 1 点だけ食い違う。守りたいのは「重複が消えて数が減っている」こと
-  const exact = new Set((lm.spawn || []).map((s) => `${s.sd}/${s.p[0]}/${s.p[2]}`));
-  eq(exact.size, lm.spawn.length, '完全に同じ位置の点が残っている');
-  truthy(lm.spawn.length < 260, `間引きが効いていない: ${lm.spawn.length} 点（生データは 327）`);
-  return `woods ${lm.spawn.length} 点 / 陣営 ${[...sides].join(', ')}`;
+await check('湧きは間引かず、統合シーンの重複だけを落としている', async () => {
+  // 湧き位置は「だいたいこの辺」では意味が無いので間引かない。
+  // 一方、夜や別バージョンのシーンを統合したぶんの完全重複は落とす
+  // （night-factory は factory と 117 点すべてが同一座標）。
+  let total = 0;
+  for (const m of db.maps) {
+    if (!m.landmarkFile) continue;
+    const lm = await loadLandmarks(m.key, '../' + m.landmarkFile);
+    for (const kind of ['spawnPmc', 'spawnScav', 'spawnBoth']) {
+      const list = lm[kind] || [];
+      total += list.length;
+      const exact = new Set(list.map((s) => `${s.p[0]}/${s.p[1]}/${s.p[2]}`));
+      eq(exact.size, list.length, `${m.key}/${kind} に同一座標の重複が残っている`);
+    }
+  }
+  truthy(total >= 2000, `間引かない前提なのに点が少ない: ${total}`);
+  const woods = await loadLandmarks('woods', '../' + db.byKey.get('woods').landmarkFile);
+  const sides = new Set([...(woods.spawnPmc || []), ...(woods.spawnScav || [])].map((s) => s.sd));
+  truthy(sides.size >= 2, `woods の陣営が 1 種類しかない: ${[...sides].join(',')}`);
+  return `全マップ ${total} 点 / 重複なし / woods の陣営 ${[...sides].join(', ')}`;
+});
+
+await check('AI 専用の湧きを混ぜていない', async () => {
+  // categories が bot / boss / sniper のものはプレイヤーの湧きではない。
+  // 混ぜると「ここに湧く」と言いながら実際には湧かない点が出る
+  const raw = await fetch('../tools/.cache/api_maps.json').then((r) => (r.ok ? r.json() : null));
+  if (!raw) return 'ビルド用キャッシュが無いので照合を省略';
+  const ALIAS = {
+    'night-factory': 'factory', 'ground-zero-21': 'ground-zero',
+    'ground-zero-tutorial': 'ground-zero', 'the-lab-dark': 'the-lab',
+  };
+  const want = new Set();
+  for (const m of Object.values(raw.data.maps)) {
+    const key = ALIAS[m.normalizedName] || m.normalizedName;
+    for (const sp of m.spawns || []) {
+      if (!sp.position || !(sp.categories || []).includes('player')) continue;
+      const side = (sp.sides || []).includes('pmc') ? 'pmc'
+        : (sp.sides || []).includes('scav') ? 'scav' : 'all';
+      // 0.1m 刻みの整数で持つ。Python の round は偶数丸め、JS の toFixed は
+      // 絶対値の大きいほうへ丸めるので、境界の値は 1 刻みずれる
+      want.add(`${key}/${side}/${Math.round(sp.position.x * 10)}/${Math.round(sp.position.z * 10)}`);
+    }
+  }
+  let checked = 0;
+  for (const m of db.maps) {
+    if (!m.landmarkFile) continue;
+    const lm = await loadLandmarks(m.key, '../' + m.landmarkFile);
+    for (const kind of ['spawnPmc', 'spawnScav', 'spawnBoth']) {
+      for (const s of lm[kind] || []) {
+        checked++;
+        const xi = Math.round(s.p[0] * 10);
+        const zi = Math.round(s.p[2] * 10);
+        let hit = false;
+        for (let dx = -1; dx <= 1 && !hit; dx++) {
+          for (let dz = -1; dz <= 1 && !hit; dz++) {
+            if (want.has(`${m.key}/${s.sd}/${xi + dx}/${zi + dz}`)) hit = true;
+          }
+        }
+        truthy(hit, `${m.key} の ${kind} に上流に無い点がある: ${s.p}`);
+      }
+    }
+  }
+  return `${checked} 点すべてが上流の player 湧きと一致`;
 });
 
 await check('砲撃ゾーンが面として描ける形をしている', async () => {

@@ -20,7 +20,9 @@ import {
   loadTasks, filterTasks, taskLabel, objectiveGeometry, objectiveApplies,
   taskKeyDoors, taskLoadout, taskPoints, OBJECTIVE_TYPE,
 } from './tasks.js';
-import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from './landmarks.js';
+import {
+  loadLandmarks, LAYERS, DEFAULT_ENABLED, layerCount, hazardLabel, bossLabel,
+} from './landmarks.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -313,8 +315,8 @@ function landmarkLabel(item, kind) {
   if (kind === 'boss') return bossLabel(item);
   if (kind === 'lock') return item.n || '施錠扉';
   if (kind === 'gun') return '固定武器';
-  // 湧きは 1 マップ 150 点あるので、地図上に文字は出さない（吹き出しだけ）
-  if (kind === 'spawn') return '';
+  // 湧きは 1 マップ 400 点あるので、地図上に文字は出さない（吹き出しだけ）
+  if (kind === 'spawnPmc' || kind === 'spawnScav') return '';
   return item.n || '';
 }
 
@@ -323,15 +325,15 @@ function renderLandmarks() {
 
   // どの種類が何件あるか出す。0 件なら「このマップには無い」と分かる
   const counts = LAYERS.filter((d) => state.layers.has(d.id))
-    .map((d) => `${d.name} ${(state.landmarks[d.id] || []).length}`)
+    .map((d) => `${d.name} ${layerCount(d, state.landmarks)}`)
     .join(' / ');
   $('layer-hint').textContent = state.landmarks.failed
     ? `地点データを読めませんでした（${state.landmarks.failed}）`
     : counts || 'チェックを入れると地名や危険地帯を出せます。';
 
   for (const label of $('layer-filter').querySelectorAll('.chip')) {
-    const n = (state.landmarks[label.dataset.layer] || []).length;
-    label.classList.toggle('empty', n === 0);
+    const def = LAYERS.find((d) => d.id === label.dataset.layer);
+    label.classList.toggle('empty', layerCount(def, state.landmarks) === 0);
   }
   return drawn;
 }
