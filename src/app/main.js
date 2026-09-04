@@ -357,6 +357,11 @@ function setupTasks() {
     state.taskFilter = ev.target.value;
     renderTaskOptions();
   });
+  // 候補をクリックしたら、その場で選ぶ
+  $('task-hits').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.hit');
+    if (btn) selectTask(btn.dataset.id);
+  });
   $('task-select').addEventListener('change', (ev) => selectTask(ev.target.value));
   $('btn-task-clear').addEventListener('click', () => selectTask(''));
 
@@ -459,6 +464,51 @@ function renderTaskOptions() {
   }
   sel.disabled = !state.tasks.length;
   sel.value = state.activeTask ? state.activeTask.id : '';
+  renderTaskHits(shown);
+}
+
+/**
+ * 検索の候補をその場に並べる。
+ *
+ * 今までは select の中身を絞るだけだったので、打っても画面は何も変わらず、
+ * ドロップダウンを開くまで結果が見えなかった。「検索しても出てこない」と
+ * 言われる原因はこれ。打った時点で見えるようにする。
+ */
+function renderTaskHits(shown) {
+  const box = $('task-hits');
+  box.innerHTML = '';
+  if (!state.taskFilter.trim()) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  if (!shown.length) {
+    const none = document.createElement('div');
+    none.className = 'none';
+    none.textContent = `「${state.taskFilter.trim()}」に一致するタスクはありません`;
+    box.appendChild(none);
+    return;
+  }
+  // 全部並べると長くなるので上から 20 件。件数は必ず出す
+  const LIMIT = 20;
+  for (const t of shown.slice(0, LIMIT)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hit';
+    btn.dataset.id = t.id;
+    const placed = taskPoints(t, state.selectedKey).length > 0;
+    btn.innerHTML =
+      `<span class="pl">${placed ? '◎' : ''}</span>` +
+      `<span>${escapeHtml(t.n || '')}${t.any ? '〈任意〉' : ''}</span>` +
+      `<span class="tr">${escapeHtml(t.tr || '')}${t.lv ? ` Lv${t.lv}` : ''}</span>`;
+    box.appendChild(btn);
+  }
+  const more = document.createElement('div');
+  more.className = 'more';
+  more.textContent = shown.length > LIMIT
+    ? `${shown.length} 件中 ${LIMIT} 件を表示（絞り込むと減ります）`
+    : `${shown.length} 件`;
+  box.appendChild(more);
 }
 
 function selectTask(id) {

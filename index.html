@@ -277,6 +277,25 @@ body.side-collapsed #btn-side-show { display: block; }
   box-shadow: 0 0 8px rgba(180,140,255,.55), 0 0 3px rgba(0,0,0,.9);
 }
 
+/* 検索の候補。打った時点で見えないと「出てこない」と思われる */
+#task-hits {
+  margin-top: 4px; max-height: 230px; overflow-y: auto;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--panel-2);
+}
+#task-hits .hit {
+  display: grid; grid-template-columns: 14px 1fr auto; gap: 6px; align-items: baseline;
+  width: 100%; padding: 5px 7px; border: 0; background: transparent; cursor: pointer;
+  text-align: left; color: var(--ink); font: 12px/1.45 var(--sans);
+  border-bottom: 1px solid var(--rule);
+}
+#task-hits .hit:last-child { border-bottom: 0; }
+#task-hits .hit:hover, #task-hits .hit:focus-visible { background: var(--panel); color: var(--accent); }
+#task-hits .hit .pl { font: 11px/1 var(--mono); color: var(--accent); }
+#task-hits .hit .tr { font: 10px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
+#task-hits .none { padding: 7px; color: var(--muted); font-size: 11px; }
+#task-hits .more { padding: 5px 7px; color: var(--muted); font-size: 11px;
+                   border-top: 1px solid var(--rule); }
+
 /* 持ち物 */
 #task-loadout { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
 #task-loadout:empty { display: none; }
@@ -533,7 +552,10 @@ body.side-collapsed #btn-side-show { display: block; }
 
   <div>
     <label for="task-select">タスクの目標地点</label>
-    <input type="search" id="task-filter" placeholder="タスク名・トレーダー・目標で絞り込む" autocomplete="off">
+    <input type="search" id="task-filter"
+           placeholder="タスク名・トレーダー・マップ名で検索（インターチェンジ など）"
+           autocomplete="off">
+    <div id="task-hits" hidden></div>
     <label class="check" id="task-hide-wrap" style="margin-top:6px">
       <input type="checkbox" id="task-hide-done"><span>終わったタスクを隠す</span>
     </label>

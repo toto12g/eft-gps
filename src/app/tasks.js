@@ -72,6 +72,9 @@ export async function loadTasks(mapKey, file, anyFile = null) {
       file ? fetchList(file) : Promise.resolve([]),
       anyFile ? fetchList(anyFile) : Promise.resolve([]),
     ]);
+    // どのマップの一覧に出ているかを覚えておく。座標を持たないタスクを
+    // 「インターチェンジ」のようなマップ名で引けるようにするため
+    for (const t of own) t.mk = mapKey;
     const out = [...own, ...any];
     cache.set(mapKey, out);
     return out;
@@ -113,16 +116,128 @@ export function taskPoints(task, mapKey) {
   return pts;
 }
 
-/** 検索語でタスクを絞る。名前・トレーダー・目標の説明を対象にする。 */
+/**
+ * マップとトレーダーの日本語での呼び名。
+ *
+ * 上流には日本語のマップ名もトレーダー名も無い（maps_ja を引いても
+ * "Interchange" が返る）。「インターチェンジ」と打って 0 件になるのは
+ * 検索として使いものにならないので、ここで対応表を持つ。
+ * 通称も入れる（モール / 灯台 / ラボ …）。ただし 2 文字の略称は
+ * 英単語の中に埋もれるので入れない（IC は 206 件中 96 件に当たった）。
+ */
+export const MAP_ALIASES = {
+  customs: 'カスタム カスタムズ 税関',
+  factory: 'ファクトリー 工場',
+  'ground-zero': 'グラウンドゼロ グラゼロ',
+  icebreaker: 'アイスブレイカー 砕氷船',
+  interchange: 'インターチェンジ インター モール ショッピングモール',
+  lighthouse: 'ライトハウス 灯台',
+  reserve: 'リザーブ 軍事基地 基地',
+  shoreline: 'ショアライン 海岸 リゾート',
+  'streets-of-tarkov': 'ストリート ストリーツ ストリートオブタルコフ 街 市街',
+  terminal: 'ターミナル',
+  'the-lab': 'ラボ ザラボ 研究所',
+  'the-labyrinth': 'ラビリンス 迷宮 迷路',
+  woods: 'ウッズ 森',
+};
+
+export const TRADER_ALIASES = {
+  Prapor: 'プラポー プラポール',
+  Therapist: 'セラピスト',
+  Skier: 'スキヤー スキアー',
+  Peacekeeper: 'ピースキーパー',
+  Mechanic: 'メカニック',
+  Ragman: 'ラグマン',
+  Jaeger: 'イェーガー イエーガー ジェーガー',
+  Fence: 'フェンス',
+  Lightkeeper: 'ライトキーパー',
+  Ref: 'レフ',
+  'Btr Driver': 'BTR BTR運転手 装甲車',
+};
+
+/**
+ * 検索用に文字を揃える。
+ *
+ * 打ち間違いではなく「書き方が違うだけ」で外れるのを防ぐ:
+ *   全角英数 → 半角、カタカナ → ひらがな、長音や中黒・空白は無視。
+ * これで「インターチェンジ」「ｲﾝﾀｰﾁｪﾝｼﾞ」「いんたちぇんじ」が同じになる。
+ */
+export function normalizeQuery(s) {
+  return foldChars(s).replace(SEPARATORS, '');
+}
+
+/** 区切りを残したまま、文字の書き方だけを揃える。 */
+function foldChars(s) {
+  return String(s ?? '')
+    // NFKC が全角英数と半角カタカナをまとめて直す
+    // （ｲﾝﾀｰﾁｪﾝｼﾞ → インターチェンジ、Ａ → A）
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+
+const SEPARATORS = /[\s\u30fb\uff65\u30fc\u2010-\u2015\-_/\uff0f\u3001,.\u3002]/g;
+
+
+/**
+ * そのタスクを検索するときに当てる文字列。
+ * @returns {{tight:string, spaced:string}}
+ */
+export function searchText(task) {
+  if (task.__hay !== undefined) return task.__hay;
+  const parts = [task.n || '', task.tr || ''];
+  for (const o of task.o || []) {
+    parts.push(o.d || '');
+    for (const z of o.z || []) parts.push(z.m || '', MAP_ALIASES[z.m] || '');
+    for (const l of o.l || []) parts.push(l.m || '', MAP_ALIASES[l.m] || '');
+  }
+  // 座標を持たないタスクは、どのマップの一覧に出ているかで引けるようにする
+  if (task.mk) parts.push(task.mk, MAP_ALIASES[task.mk] || '');
+
+  // トレーダーの和名は、クエストの提供者だけでなく目標文に出てくる名前にも
+  // 当てる（「Ragman に渡す」が目標のタスクは提供者が別人のことがある）。
+  const joined = parts.join(' ');
+  for (const [en, ja] of Object.entries(TRADER_ALIASES)) {
+    if (joined.toLowerCase().includes(en.toLowerCase())) parts.push(ja);
+  }
+
+  // 2 つ持つ。tight は区切りを落としたもの（「インター チェンジ」でも当たる）、
+  // spaced は区切りを残したもの（短い英字が単語の先頭かを見るのに要る）。
+  const folded = foldChars(parts.join(' '));
+  const hay = { tight: folded.replace(SEPARATORS, ''), spaced: folded };
+  Object.defineProperty(task, '__hay', { value: hay });
+  return hay;
+}
+
+/**
+ * 検索語でタスクを絞る。
+ *
+ * 空白で区切った語はすべて含むものだけを返す（「ラグマン ドレス」のように
+ * 絞り込める）。課題名は上流に和訳が無く常に英語、目標文は和訳されるので、
+ * どちらの言語で打っても引けるようにマップ名とトレーダー名の別名も当てる。
+ */
 export function filterTasks(tasks, query) {
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return tasks;
+  const terms = normalizeQuery(query).length
+    ? String(query).trim().split(/\s+/).map(normalizeQuery).filter(Boolean)
+    : [];
+  if (!terms.length) return tasks;
+
+  // 2 文字以下の英字は、英単語の途中に当たると使いものにならない
+  // （"ic" は Medic / Chemical / Classic … に当たり、206 件中 62 件が出た）。
+  // ただし単語の先頭は認める。「Hot Wh」のように名前を途中まで打つ使い方を
+  // 潰さないため（"wh" は wheels の先頭）。
+  // 日本語には語の区切りが無いので、この規則は英字のときだけ使う。
+  const matcher = (term) => {
+    if (term.length > 2 || !/^[a-z0-9]+$/.test(term)) {
+      return (hay) => hay.tight.includes(term);
+    }
+    const re = new RegExp(`(^|[^a-z0-9])${term}`);
+    return (hay) => re.test(hay.spaced);
+  };
+  const tests = terms.map(matcher);
   return tasks.filter((t) => {
-    // 課題名は上流に和訳が無く常に英語、目標文は和訳される。
-    // 両方を見るので、どちらの言語で打っても引ける
-    if ((t.n || '').toLowerCase().includes(q)) return true;
-    if ((t.tr || '').toLowerCase().includes(q)) return true;
-    return (t.o || []).some((o) => (o.d || '').toLowerCase().includes(q));
+    const hay = searchText(t);
+    return tests.every((fn) => fn(hay));
   });
 }
 

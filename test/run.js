@@ -1241,6 +1241,70 @@ await check('目標の種類に日本語表示がある', () => {
 
 /* --------------------------------------------------------------------- T25 */
 
+/* --------------------------------------------------------------------- T26 */
+
+group('T26 タスク検索（報告された不具合）');
+
+const icTasks = await loadTasks('interchange', '../data/tasks/interchange.json', '../data/tasks/_any.json');
+
+await check('日本語のマップ名で引ける', () => {
+  // 上流には日本語のマップ名が無く（maps_ja を引いても "Interchange" が返る）、
+  // 「インターチェンジ」と打つと 0 件だった。別名表を持って解決している。
+  const n = filterTasks(icTasks, 'インターチェンジ').length;
+  truthy(n >= 30, `インターチェンジで引けない: ${n} 件`);
+  // 書き方が違うだけで外れないこと
+  for (const q of ['ｲﾝﾀｰﾁｪﾝｼﾞ', 'いんたーちぇんじ', 'ｲﾝﾀｰﾁｪﾝｼﾞ', 'インターチェンジ']) {
+    eq(filterTasks(icTasks, q).length, n, `「${q}」で件数が変わる`);
+  }
+  eq(filterTasks(icTasks, 'モール').length, n, '通称でも同じ結果になるべき');
+  return `インターチェンジ / 半角カナ / ひらがな / モール すべて ${n} 件`;
+});
+
+await check('空白区切りは「すべて含む」で絞る', () => {
+  const a = filterTasks(icTasks, 'ラグマン').length;
+  const b = filterTasks(icTasks, 'インターチェンジ').length;
+  const both = filterTasks(icTasks, 'ラグマン インターチェンジ').length;
+  truthy(both > 0, '組み合わせで 0 件になった');
+  truthy(both < a && both < b, `絞り込めていない: ${a} / ${b} → ${both}`);
+  return `ラグマン ${a} 件 / インターチェンジ ${b} 件 → 両方 ${both} 件`;
+});
+
+await check('短い略称で無関係なタスクを拾わない', () => {
+  // "IC" のような 2 文字の略称は英単語の中に埋もれる。
+  // 別名に入れていたときは 206 件中 96 件が当たっていた
+  const n = filterTasks(icTasks, 'IC').length;
+  truthy(n < icTasks.length * 0.2, `IC で拾いすぎ: ${n} / ${icTasks.length} 件`);
+  return `IC → ${n} / ${icTasks.length} 件`;
+});
+
+await check('トレーダー名は日本語でも引ける', () => {
+  const en = filterTasks(icTasks, 'Ragman').length;
+  const ja = filterTasks(icTasks, 'ラグマン').length;
+  truthy(en > 0, 'Ragman で引けない');
+  eq(ja, en, `日本語と英語で件数が違う: ${ja} vs ${en}`);
+  return `Ragman / ラグマン ともに ${en} 件`;
+});
+
+await check('上流のタスクが 1 件も欠けていない', async () => {
+  // マップごとに切り分けているので、どこにも入らないタスクが出ると
+  // 一覧から静かに消える。全ファイルの和が上流と一致することを見る
+  const raw = await fetch('../tools/.cache/tasks.json').then((r) => (r.ok ? r.json() : null));
+  if (!raw) return 'ビルド用キャッシュが無いので照合を省略';
+  const upstream = new Set(
+    (Array.isArray(raw.data.tasks) ? raw.data.tasks : Object.values(raw.data.tasks))
+      .map((t) => t.id).filter(Boolean),
+  );
+  const have = new Set();
+  for (const m of db.maps) {
+    if (!m.taskFile) continue;
+    for (const t of await fetch('../' + m.taskFile).then((r) => r.json())) have.add(t.id);
+  }
+  for (const t of await fetch('../' + db.anyTaskFile).then((r) => r.json())) have.add(t.id);
+  const missing = [...upstream].filter((id) => !have.has(id));
+  eq(missing.length, 0, `一覧に出ないタスクがある: ${missing.length} 件`);
+  return `上流 ${upstream.size} 件すべてが一覧に出る`;
+});
+
 group('T25 現在地が地図の外に描かれる不具合（報告された不具合）');
 await check('切替の根拠が「累積」か「1 枚」かを区別している', () => {
   // 1 枚だけの提案で地図を動かすと、レイド 1 本あたり 3.8%（Customs は 10%）
