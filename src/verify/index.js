@@ -187,6 +187,26 @@ export class MapTracker {
     this.window.push(entry);
     if (this.window.length > this.maxSamples) this.window.shift();
 
+    // 1 枚で断定できる座標が、累積の結論と食い違ったら、貯めたものは
+    // 前のレイドのものだと考えて捨てる。
+    //
+    // レイドを続けて回ると 10 分の間隔判定では切れず、前のレイドの十数枚が
+    // 新しいレイドの 1 枚を数で押し切ってしまう。しかも混ざった集合の結論は
+    // どちらでもない第三のマップになることがある（Customs 16 枚 + Streets 1 枚
+    // → woods）。累積は「同じレイドの中でだけ」意味を持つ。
+    if (this.window.length > 1) {
+      const r = entry.ranking;
+      const decisive = r.length > 1 && r[0].d < 5 && r[1].d / Math.max(r[0].d, 1e-9) > 5;
+      if (decisive) {
+        const before = this.rank(this.window.slice(0, -1));
+        if (before.length && before[0].key !== r[0].key) {
+          this.window = [entry];
+          this.brokeAt = 'decisive-mismatch';
+          return this.scores();
+        }
+      }
+    }
+
     // トランジットなどでマップが変わったなら、貯めたものを捨てる
     if (this.window.length > this.switchWindow) {
       const recent = this.window.slice(-this.switchWindow);

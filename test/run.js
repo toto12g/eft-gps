@@ -1306,6 +1306,50 @@ await check('上流のタスクが 1 件も欠けていない', async () => {
 });
 
 group('T25 現在地が地図の外に描かれる不具合（報告された不具合）');
+await check('前のレイドの累積が、次のレイドの 1 枚を押し切らない', () => {
+  // 報告: ストリートでマップを開くと別のマップに飛ばされる。
+  //
+  // レイドを続けて回ると 10 分の間隔判定では累積が切れず、前のレイドの
+  // 十数枚が新しいレイドの 1 枚を数で押し切っていた。しかも混ざった集合の
+  // 結論はどちらでもない第三のマップになる（Customs 16 枚 + Streets 1 枚
+  // → woods）。これが consensus 扱いで、裏づけ待ちも素通りしていた。
+  const t0 = 1788000000000;
+  const flew = [];
+  for (const [name, raid] of [['customs', CUSTOMS_RAID], ['woods', WOODS_RAID],
+    ['interchange', INTERCHANGE_RAID]]) {
+    const t = new MapTracker();
+    raid.forEach((f, i) => t.add(parseScreenshotName(f), db, t0 + i * 60000));
+    // 5 分後、ユーザーはストリートに入る（マップは選び直していない想定）
+    const base = t0 + raid.length * 60000 + 5 * 60000;
+    const s1 = parseScreenshotName(RAID1);
+    t.add(s1, db, base);
+    const v = validateSample({
+      sample: s1, selectedKey: 'streets-of-tarkov', db, fileModifiedMs: null, tracker: t,
+    });
+    if (v.verdict === VERDICT.WRONG_MAP) flew.push(`${name} の後 → ${v.suggest} (via ${v.via})`);
+  }
+  eq(flew.length, 0, `別マップへ飛ばされた: ${flew.join(', ')}`);
+  return '3 本のレイドの直後どれでも、ストリートの 1 枚目が accept される';
+});
+
+await check('同じレイドの途中では累積を切らない', () => {
+  // 上の対策で切りすぎていないことの確認。
+  // 実レイド 3 本を頭から流し、累積が切れた回数を数える
+  const cuts = [];
+  for (const [name, raid] of [['customs', CUSTOMS_RAID], ['woods', WOODS_RAID],
+    ['interchange', INTERCHANGE_RAID]]) {
+    const t = new MapTracker();
+    let n = 0;
+    raid.forEach((f, i) => {
+      t.add(parseScreenshotName(f), db, 1788000000000 + i * 60000);
+      if (t.brokeAt === 'decisive-mismatch') n++;
+    });
+    if (n) cuts.push(`${name} ${n} 回`);
+  }
+  eq(cuts.length, 0, `レイド中に累積が切れた: ${cuts.join(', ')}`);
+  return `customs ${CUSTOMS_RAID.length} / woods ${WOODS_RAID.length} / interchange ${INTERCHANGE_RAID.length} 枚、切断 0 回`;
+});
+
 await check('切替の根拠が「累積」か「1 枚」かを区別している', () => {
   // 1 枚だけの提案で地図を動かすと、レイド 1 本あたり 3.8%（Customs は 10%）
   // が誤って飛ばされた。根拠を verdict に持たせ、1 枚のときは

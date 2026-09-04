@@ -132,7 +132,7 @@ async function boot() {
   }
   if (!state.db.byKey.has(state.selectedKey)) state.selectedKey = state.db.maps[0].key;
   sel.value = state.selectedKey;
-  sel.addEventListener('change', () => selectMap(sel.value));
+  sel.addEventListener('change', () => selectMap(sel.value, { byUser: true }));
 
   $('input-form').addEventListener('submit', (ev) => {
     ev.preventDefault();
@@ -1182,7 +1182,20 @@ function headingOf(sample) {
 
 /* ------------------------------------------------------------------ 表示 */
 
-async function selectMap(key) {
+/**
+ * 表示するマップを変える。
+ * @param {string} key
+ * @param {{byUser?:boolean}} [opts] byUser:true なら、貯めた判定材料を捨てる。
+ *   手で選び直したということは「今ここにいる」と言われたのと同じで、
+ *   前のレイドの座標を根拠に残しておくと、その直後の 1 枚が
+ *   数で押し切られて別のマップへ飛ばされる。
+ */
+async function selectMap(key, opts = {}) {
+  if (opts.byUser) {
+    state.tracker.reset();
+    state.pendingSwitch = null;
+    state.view.clearTrail();
+  }
   state.selectedKey = key;
   localStorage.setItem('eft-gps.map', key);
   $('map-select').value = key;
