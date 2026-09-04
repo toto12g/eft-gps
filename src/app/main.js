@@ -18,7 +18,7 @@ import { MapView } from './map.js';
 import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
 import {
   loadTasks, filterTasks, taskLabel, objectiveGeometry, objectiveApplies,
-  taskKeyDoors, taskLoadout, taskPoints, OBJECTIVE_TYPE,
+  taskKeyDoors, taskLoadout, taskPoints, normalizeQuery, OBJECTIVE_TYPE,
 } from './tasks.js';
 import {
   loadLandmarks, LAYERS, DEFAULT_ENABLED, layerCount, hazardLabel, bossLabel,
@@ -101,6 +101,9 @@ const state = {
   activePinId: localStorage.getItem('eft-gps.activePin') || null,
   placing: false,
   measuring: false,
+  /** 一覧で選ばれている鍵の ID。その鍵で開く扉を地図で強調する */
+  activeKeyId: null,
+  keyFilter: '',
   received: 0,
   skipped: 0,
   /** 直前の 1 枚が提案した切替先。2 枚続けて同じことを言うまで動かさない */
@@ -204,6 +207,7 @@ async function boot() {
   setupPins();
   setupSidebar();
   setupExport();
+  setupKeys();
   setupTasks();
 
   await selectMap(state.selectedKey);
@@ -347,7 +351,85 @@ function renderLandmarks() {
     const def = LAYERS.find((d) => d.id === label.dataset.layer);
     label.classList.toggle('empty', layerCount(def, state.landmarks) === 0);
   }
+  // 地点データが入れ替わったので、鍵の一覧と強調も出し直す
+  if (!(state.landmarks.lock || []).some((l) => l.k === state.activeKeyId)) {
+    state.activeKeyId = null;
+  }
+  renderKeys();
+  state.view.setFocusLocks(
+    (state.landmarks.lock || []).filter((l) => l.k === state.activeKeyId),
+  );
   return drawn;
+}
+
+/* ------------------------------------------------------- 鍵と施錠扉 */
+
+/**
+ * この地図の施錠扉を、鍵の名前でまとめて出す。
+ *
+ * 扉の印は数が多いのでラベルを拡大時しか出しておらず、「この扉はどの鍵か」
+ * が分からなかった。鍵の名前から引けるようにして、押したらその鍵で開く扉を
+ * 地図で強調する。1 本の鍵で複数の扉が開くことがあるので件数も出す。
+ */
+function setupKeys() {
+  $('key-filter').addEventListener('input', (ev) => {
+    state.keyFilter = ev.target.value;
+    renderKeys();
+  });
+  $('key-list').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.k');
+    if (!btn) return;
+    // もう一度押したら強調を解除する
+    state.activeKeyId = state.activeKeyId === btn.dataset.key ? null : btn.dataset.key;
+    renderKeys();
+    focusKeyDoors();
+  });
+}
+
+/** いま選ばれている鍵の扉を強調し、全部入るように寄る。 */
+function focusKeyDoors() {
+  const locks = (state.landmarks.lock || []).filter((l) => l.k === state.activeKeyId);
+  state.view.setFocusLocks(locks);
+  if (locks.length) state.view.fitWorldPoints(locks.map((l) => ({ x: l.p[0], z: l.p[2] })));
+}
+
+function renderKeys() {
+  const box = $('key-list');
+  const field = $('keys-field');
+  box.innerHTML = '';
+  const locks = state.landmarks.lock || [];
+  field.hidden = locks.length === 0;
+  if (!locks.length) return;
+
+  // 同じ鍵で開く扉をまとめる
+  const byKey = new Map();
+  for (const l of locks) {
+    const id = l.k || l.n || '?';
+    if (!byKey.has(id)) byKey.set(id, { id, name: l.n || '名前のない鍵', n: 0 });
+    byKey.get(id).n += 1;
+  }
+  const q = normalizeQuery(state.keyFilter);
+  const rows = [...byKey.values()]
+    .filter((k) => !q || normalizeQuery(k.name).includes(q))
+    .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, 'ja'));
+
+  if (!rows.length) {
+    const none = document.createElement('div');
+    none.className = 'none';
+    none.textContent = `「${state.keyFilter.trim()}」に一致する鍵はありません`;
+    box.appendChild(none);
+    return;
+  }
+  for (const k of rows) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'k';
+    btn.dataset.key = k.id;
+    btn.setAttribute('aria-pressed', String(state.activeKeyId === k.id));
+    btn.innerHTML =
+      `<span>${escapeHtml(k.name)}</span><span class="cnt">${k.n} 箇所</span>`;
+    box.appendChild(btn);
+  }
 }
 
 /* -------------------------------------------------------------- タスク */

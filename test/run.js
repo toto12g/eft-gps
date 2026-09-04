@@ -1243,6 +1243,62 @@ await check('目標の種類に日本語表示がある', () => {
 
 /* --------------------------------------------------------------------- T26 */
 
+/* --------------------------------------------------------------------- T27 */
+
+group('T27 鍵と施錠扉');
+
+await check('すべての施錠扉が鍵の ID と名前を持つ', async () => {
+  // 鍵の名前で一覧を作るので、名前が欠けると「名前のない鍵」に落ちる。
+  // ID も無いと同じ鍵の扉をまとめられない
+  let total = 0;
+  const noKey = [];
+  const noName = [];
+  for (const m of db.maps) {
+    if (!m.landmarkFile) continue;
+    const lm = await loadLandmarks(m.key, '../' + m.landmarkFile);
+    for (const lock of lm.lock || []) {
+      total++;
+      if (!lock.k) noKey.push(`${m.key}/${lock.n || '?'}`);
+      if (!lock.n) noName.push(`${m.key}/${lock.k || '?'}`);
+    }
+  }
+  eq(noName.length, 0, `名前が無い扉: ${noName.slice(0, 3).join(', ')}`);
+  truthy(noKey.length === 0, `鍵の ID が無い扉: ${noKey.slice(0, 3).join(', ')}`);
+  truthy(total >= 300, `施錠扉が少なすぎる: ${total}`);
+  return `${total} 箇所すべてに鍵の ID と名前がある`;
+});
+
+await check('鍵の名前が内部 ID のまま残っていない', async () => {
+  const raw = [];
+  for (const m of db.maps) {
+    if (!m.landmarkFile) continue;
+    const lm = await loadLandmarks(m.key, '../' + m.landmarkFile);
+    for (const lock of lm.lock || []) {
+      // 24 桁の 16 進はアイテムの内部 ID。表示名の解決に失敗した跡
+      if (/^[0-9a-f]{24}$/.test(lock.n)) raw.push(`${m.key}/${lock.n}`);
+    }
+  }
+  eq(raw.length, 0, `内部 ID が表示名になっている: ${raw.slice(0, 3).join(', ')}`);
+  return '全マップで表示名に解決済み';
+});
+
+await check('同じ鍵の扉が ID でまとまる', async () => {
+  // 1 本の鍵で複数の扉が開く（Interchange の Goshan のレジは 32 箇所）。
+  // ID でまとめるので、同じ ID に別の名前がぶら下がっていると表示が割れる
+  const lm = await loadLandmarks('interchange', '../' + db.byKey.get('interchange').landmarkFile);
+  const byId = new Map();
+  for (const lock of lm.lock || []) {
+    if (!byId.has(lock.k)) byId.set(lock.k, new Set());
+    byId.get(lock.k).add(lock.n);
+  }
+  const split = [...byId.entries()].filter(([, names]) => names.size > 1);
+  eq(split.length, 0, `同じ ID に別名がある: ${split.slice(0, 2).map(([k]) => k).join(', ')}`);
+  const biggest = Math.max(...[...byId.values()].map(() => 0),
+    ...[...byId.keys()].map((k) => (lm.lock || []).filter((l) => l.k === k).length));
+  truthy(biggest >= 20, `まとまりが小さい: 最大 ${biggest} 箇所`);
+  return `${byId.size} 種類の鍵 / 最も多いもので ${biggest} 箇所`;
+});
+
 group('T26 タスク検索（報告された不具合）');
 
 const icTasks = await loadTasks('interchange', '../data/tasks/interchange.json', '../data/tasks/_any.json');

@@ -277,6 +277,35 @@ body.side-collapsed #btn-side-show { display: block; }
   box-shadow: 0 0 8px rgba(180,140,255,.55), 0 0 3px rgba(0,0,0,.9);
 }
 
+/* 鍵の一覧。押すとその鍵で開く扉を地図で強調する */
+#key-list {
+  margin-top: 5px; max-height: 210px; overflow-y: auto;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--panel-2);
+}
+#key-list .k {
+  display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: baseline;
+  width: 100%; padding: 5px 7px; border: 0; background: transparent; cursor: pointer;
+  text-align: left; color: var(--ink); font: 12px/1.45 var(--sans);
+  border-bottom: 1px solid var(--rule);
+}
+#key-list .k:last-child { border-bottom: 0; }
+#key-list .k:hover { background: var(--panel); color: var(--accent); }
+#key-list .k[aria-pressed="true"] { background: var(--panel); color: var(--accent); }
+#key-list .k .cnt { font: 10px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
+#key-list .none { padding: 7px; color: var(--muted); font-size: 11px; }
+
+/* 強調した施錠扉。鍵の名前を常に出す */
+.lock-focus > span { position: absolute; }
+.lock-focus .mark {
+  left: -11px; top: -11px; width: 22px; height: 22px; border-radius: 3px;
+  background: #ffd479; border: 3px solid #0a0c0d;
+  box-shadow: 0 0 10px rgba(255,212,121,.85), 0 0 3px rgba(0,0,0,.9);
+}
+.lock-focus .label {
+  left: 15px; top: -9px; white-space: nowrap; font: 600 11px/1.4 var(--mono);
+  color: #ffd479; text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
+}
+
 /* 検索の候補。打った時点で見えないと「出てこない」と思われる */
 #task-hits {
   margin-top: 4px; max-height: 230px; overflow-y: auto;
@@ -538,6 +567,11 @@ body.side-collapsed #btn-side-show { display: block; }
       <label>地図に出すもの</label>
       <div id="layer-filter" class="chips wrap"></div>
       <div id="layer-hint" class="hint-line"></div>
+    </div>
+    <div class="field" id="keys-field" hidden>
+      <label for="key-filter">鍵と施錠扉</label>
+      <input type="search" id="key-filter" placeholder="鍵の名前で絞り込む" autocomplete="off">
+      <div id="key-list"></div>
     </div>
     <div id="map-info" style="margin-top:8px"></div>
     <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>

@@ -64,6 +64,7 @@ export class MapView {
     this.landmarkLayer = null;
     this.northCtl = null;
     this.hintLayer = null;
+    this.keyLayer = null;
     /** 表示する脱出口の陣営 */
     this.factions = new Set(['pmc', 'scav', 'shared']);
 
@@ -165,7 +166,7 @@ export class MapView {
     // 計測の途中で地図が変わったら、1 点目は捨てる（別の地図の座標なので）
     this.measureFrom = null;
     this.onMeasure(null);
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer', 'hintLayer', 'measureLayer']) {
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer', 'hintLayer', 'measureLayer', 'keyLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -576,6 +577,38 @@ export class MapView {
     // 1 点だけ極端に離れていても全部入れる。padding は画面端に貼り付かせないため
     this.map.fitBounds(this.L.latLngBounds(lls), { padding: [60, 60], maxZoom: 2, animate: true });
     return true;
+  }
+
+  /**
+   * ある鍵で開く扉だけを強調して描く。
+   *
+   * 施錠扉のラベルは数が多いので拡大するまで出さない作りだが、
+   * 「この鍵はどの扉か」を知りたいときは名前が見えないと意味がない。
+   * 選ばれた鍵の扉にだけ、常に名前を出す。
+   * @param {{p:number[], n:string}[]} locks
+   */
+  setFocusLocks(locks) {
+    const L = this.L;
+    if (this.keyLayer) {
+      this.keyLayer.remove();
+      this.keyLayer = null;
+    }
+    if (!locks || !locks.length || !this.mapData || !this.mapData.affine) return;
+    const aff = this.mapData.affine;
+    this.keyLayer = L.layerGroup().addTo(this.map);
+    locks.forEach((lock, i) => {
+      const marker = L.marker(worldToLatLng(aff, lock.p[0], lock.p[2]), {
+        icon: L.divIcon({
+          className: 'lock-focus',
+          html: `<span class="mark"></span>` +
+            `<span class="label">${escapeHtml(lock.n || '')}` +
+            `${locks.length > 1 ? ` (${i + 1}/${locks.length})` : ''}</span>`,
+          iconSize: [0, 0],
+        }),
+        zIndexOffset: 800,
+      }).addTo(this.keyLayer);
+      marker.bindTooltip(`${escapeHtml(lock.n || '')} で開く扉`);
+    });
   }
 
   /** 指定のワールド座標へ寄る。 */
