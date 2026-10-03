@@ -277,6 +277,44 @@ body.side-collapsed #btn-side-show { display: block; }
   box-shadow: 0 0 8px rgba(180,140,255,.55), 0 0 3px rgba(0,0,0,.9);
 }
 
+/* アイテムの用途 */
+#item-hits { margin-top: 5px; max-height: 240px; overflow-y: auto; }
+#item-hits:empty, #item-detail:empty { display: none; }
+#item-hits { border: 1px solid var(--rule); border-radius: 3px; background: var(--panel-2); }
+#item-hits .it {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 7px; align-items: baseline;
+  width: 100%; padding: 5px 7px; border: 0; background: transparent; cursor: pointer;
+  text-align: left; color: var(--ink); font: 12px/1.45 var(--sans);
+  border-bottom: 1px solid var(--rule);
+}
+#item-hits .it:last-child { border-bottom: 0; }
+#item-hits .it:hover { background: var(--panel); }
+#item-hits .it .use { font: 10px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
+#item-hits .none { padding: 7px; color: var(--muted); font-size: 11px; }
+
+/* 持ち帰る優先度。色だけに頼らず文字でも言う */
+.pri { font: 700 9px/1.5 var(--mono); padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
+.pri.p3 { background: #e5484d; color: #fff; }
+.pri.p2 { background: #e8c07a; color: #1a1408; }
+.pri.p1 { background: var(--panel); color: var(--muted); border: 1px solid var(--rule); }
+.pri.p0 { background: transparent; color: var(--muted); border: 1px solid var(--rule); }
+
+#item-detail { margin-top: 7px; border: 1px solid var(--rule); border-radius: 3px;
+               background: var(--panel-2); padding: 8px 9px; }
+#item-detail h4 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+#item-detail .sub { font: 10px/1.5 var(--mono); color: var(--muted); margin-bottom: 7px; }
+#item-detail .fir { color: #ff9db0; font-weight: 700; }
+#item-detail section { margin-top: 7px; }
+#item-detail section > b { display: block; font: 600 10px/1.6 var(--mono);
+                           letter-spacing: .08em; color: var(--muted); }
+#item-detail ul { margin: 2px 0 0; padding-left: 0; list-style: none; }
+#item-detail li { display: grid; grid-template-columns: 1fr auto; gap: 6px;
+                  font-size: 11.5px; line-height: 1.6; border-bottom: 1px solid var(--rule); }
+#item-detail li:last-child { border-bottom: 0; }
+#item-detail li .c { font: 600 11px/1.6 var(--mono); color: var(--accent); white-space: nowrap; }
+#item-detail .more { color: var(--muted); font-size: 11px; }
+#item-detail .wiki { display: inline-block; margin-top: 7px; font-size: 11px; }
+
 /* 鍵の一覧。押すとその鍵で開く扉を地図で強調する */
 #key-list {
   margin-top: 5px; max-height: 210px; overflow-y: auto;
@@ -567,6 +605,16 @@ body.side-collapsed #btn-side-show { display: block; }
       <label>地図に出すもの</label>
       <div id="layer-filter" class="chips wrap"></div>
       <div id="layer-hint" class="hint-line"></div>
+    </div>
+    <div class="field">
+      <label for="item-filter">アイテムの用途</label>
+      <input type="search" id="item-filter"
+             placeholder="アイテム名で検索（ワイヤー / wires など）" autocomplete="off">
+      <div class="btn-row" style="margin-top:5px">
+        <button type="button" id="btn-item-top">必ず拾うもの一覧</button>
+      </div>
+      <div id="item-hits"></div>
+      <div id="item-detail"></div>
     </div>
     <div class="field" id="keys-field" hidden>
       <label for="key-filter">鍵と施錠扉</label>

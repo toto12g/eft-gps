@@ -23,6 +23,9 @@ import {
 import {
   loadLandmarks, LAYERS, DEFAULT_ENABLED, layerCount, hazardLabel, bossLabel,
 } from './landmarks.js';
+import {
+  loadItems, searchItems, topItems, priority, useSummary, hideoutTotal,
+} from './items.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -104,6 +107,9 @@ const state = {
   /** 一覧で選ばれている鍵の ID。その鍵で開く扉を地図で強調する */
   activeKeyId: null,
   keyFilter: '',
+  /** アイテムの用途。重いので使うときに読む */
+  items: null,
+  itemFilter: '',
   received: 0,
   skipped: 0,
   /** 直前の 1 枚が提案した切替先。2 枚続けて同じことを言うまで動かさない */
@@ -208,6 +214,7 @@ async function boot() {
   setupSidebar();
   setupExport();
   setupKeys();
+  setupItems();
   setupTasks();
 
   await selectMap(state.selectedKey);
@@ -360,6 +367,148 @@ function renderLandmarks() {
     (state.landmarks.lock || []).filter((l) => l.k === state.activeKeyId),
   );
   return drawn;
+}
+
+/* --------------------------------------------------- アイテムの用途 */
+
+/**
+ * アイテムが何に使われるかを引けるようにする。
+ *
+ * データは 248KB あるので起動時には読まず、初めて検索したときに取りに行く。
+ * 測位は読めなくても動くので、失敗しても本体は止めない。
+ */
+function setupItems() {
+  const inp = $('item-filter');
+  const hits = $('item-hits');
+
+  const ensure = async () => {
+    if (state.items) return state.items;
+    hits.innerHTML = '<div class="none">読み込み中…</div>';
+    state.items = await loadItems(state.db.itemFile);
+    return state.items;
+  };
+
+  let seq = 0;
+  inp.addEventListener('input', async () => {
+    state.itemFilter = inp.value;
+    const mine = ++seq;
+    if (!state.itemFilter.trim()) {
+      hits.innerHTML = '';
+      $('item-detail').innerHTML = '';
+      return;
+    }
+    const items = await ensure();
+    if (mine !== seq) return; // 打ち続けている間の古い結果は捨てる
+    renderItemHits(searchItems(items, state.itemFilter), items.failed);
+  });
+
+  $('btn-item-top').addEventListener('click', async () => {
+    const items = await ensure();
+    inp.value = state.itemFilter = '';
+    renderItemHits(topItems(items), items.failed, '用途の多い順');
+  });
+
+  hits.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.it');
+    if (btn) renderItemDetail(state.items[btn.dataset.id], btn.dataset.id);
+  });
+}
+
+function renderItemHits(list, failed, note) {
+  const box = $('item-hits');
+  box.innerHTML = '';
+  $('item-detail').innerHTML = '';
+  if (failed) {
+    box.innerHTML = `<div class="none">アイテムのデータを読めませんでした（${escapeHtml(failed)}）</div>`;
+    return;
+  }
+  if (!list.length) {
+    box.innerHTML = `<div class="none">「${escapeHtml(state.itemFilter.trim())}」に一致するアイテムはありません。<br>`
+      + '用途が分かっているのは 634 種だけです（ハイドアウト・タスク・交換・製作に出てくるもの）。</div>';
+    return;
+  }
+  for (const it of list) {
+    const p = priority(it);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'it';
+    btn.dataset.id = it.id;
+    btn.innerHTML =
+      `<span class="pri ${p.cls}">${p.label}</span>` +
+      `<span>${escapeHtml(it.n || '')}${it.fir ? ' <span class="fir">FiR</span>' : ''}</span>` +
+      `<span class="use">${escapeHtml(useSummary(it).split(' / ')[0] || '')}</span>`;
+    box.appendChild(btn);
+  }
+  if (note) {
+    const foot = document.createElement('div');
+    foot.className = 'none';
+    foot.textContent = `${note}（${list.length} 件）`;
+    box.appendChild(foot);
+  }
+}
+
+/** 1 つのアイテムについて、どこに何個要るかを出す。 */
+function renderItemDetail(it, id) {
+  const box = $('item-detail');
+  box.innerHTML = '';
+  if (!it) return;
+  const p = priority(it);
+
+  const head = document.createElement('div');
+  head.innerHTML =
+    `<h4>${escapeHtml(it.n || '')} <span class="pri ${p.cls}">${p.label}</span></h4>` +
+    `<div class="sub">${escapeHtml(it.ne || '')}${it.s ? ` / ${escapeHtml(it.s)}` : ''}` +
+    (it.fir ? ' <span class="fir">レイド発見品(FiR)が必要</span>' : '') + '</div>';
+  box.appendChild(head);
+
+  // 列挙が長くなりすぎないよう、各項目は 6 行までにして残りは件数で言う
+  const LIMIT = 6;
+  const section = (title, rows, total) => {
+    if (!rows.length) return;
+    const el = document.createElement('section');
+    const sum = total !== undefined ? `　合計 ${total} 個` : '';
+    el.innerHTML = `<b>${title}${sum}</b>`;
+    const ul = document.createElement('ul');
+    for (const [what, count] of rows.slice(0, LIMIT)) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${escapeHtml(what)}</span><span class="c">${escapeHtml(count)}</span>`;
+      ul.appendChild(li);
+    }
+    el.appendChild(ul);
+    if (rows.length > LIMIT) {
+      const more = document.createElement('div');
+      more.className = 'more';
+      more.textContent = `ほか ${rows.length - LIMIT} 件`;
+      el.appendChild(more);
+    }
+    box.appendChild(el);
+  };
+
+  section('ハイドアウトの建設',
+    (it.h || []).map(([st, lv, c]) => [`${st} Lv${lv}`, `${c} 個`]), hideoutTotal(it));
+  section('タスク',
+    (it.t || []).map(([nm, c, alt]) => [nm, alt > 1 ? `${c} 個（${alt} 択）` : `${c} 個`]));
+  section('トレーダーとの交換',
+    (it.b || []).map(([tr, lv, got, c]) => [`${tr} Lv${lv} → ${got}`, `${c} 個`]));
+  section('製作の材料',
+    (it.c || []).map(([st, lv, prod, c]) => [`${st} Lv${lv} → ${prod}`, `${c} 個`]));
+  section('製作の道具（減らない）',
+    (it.tool || []).map(([st, lv, prod]) => [`${st} Lv${lv} → ${prod}`, '道具']));
+
+  if (it.out) {
+    const el = document.createElement('section');
+    el.innerHTML = `<b>自分で作れる</b><div class="more">ハイドアウトの製作 ${it.out} 通り</div>`;
+    box.appendChild(el);
+  }
+  if (it.w) {
+    const a = document.createElement('a');
+    a.className = 'wiki-link wiki';
+    a.href = it.w;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'Wiki で詳しく見る';
+    box.appendChild(a);
+  }
 }
 
 /* ------------------------------------------------------- 鍵と施錠扉 */

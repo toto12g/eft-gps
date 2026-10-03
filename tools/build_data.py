@@ -44,6 +44,10 @@ SRC_TASKS_LANG = "https://json.tarkov.dev/regular/tasks_{lang}"
 SRC_TRADERS = "https://json.tarkov.dev/regular/traders"
 # 施錠扉が要求する鍵の名前を引くためだけに使う。16MB あるがビルド時のみで、
 # 出力に載るのは実際に参照される 200 件弱の名前だけ。--no-keys で省ける。
+SRC_HIDEOUT = "https://json.tarkov.dev/regular/hideout"
+SRC_HIDEOUT_LANG = "https://json.tarkov.dev/regular/hideout_{lang}"
+SRC_CRAFTS = "https://json.tarkov.dev/regular/crafts"
+SRC_BARTERS = "https://json.tarkov.dev/regular/barters"
 SRC_ITEMS = "https://json.tarkov.dev/regular/items"
 SRC_ITEMS_LANG = "https://json.tarkov.dev/regular/items_{lang}"
 
@@ -366,6 +370,170 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
     total_bytes = sum((out_dir / f"{k}.json").stat().st_size for k in counts)
     print(f"  地点 {total_items} 件 / {len(counts)} ファイル {total_bytes:,} バイト", file=sys.stderr)
     return counts
+
+
+
+def build_items(refresh: bool):
+    """アイテムが何に使われるかを逆引きできる形にする。
+
+    「これは拾う価値があるのか」が分からない、という声から。
+    上流には用途そのものの一覧は無いので、ハイドアウト・タスク・交換・製作の
+    4 つを横断して集め、アイテム側から引けるように裏返す。
+
+    数が分かることを第一に置く。「要る」だけでは足りず、
+    「射撃場 Lv2 に 6 個」のように、どこに何個要るかまで出す。
+    """
+    hideout = json.loads(fetch(SRC_HIDEOUT, "hideout.json", refresh))
+    hja = json.loads(fetch(SRC_HIDEOUT_LANG.format(lang="ja"), "hideout_ja.json", refresh))["data"]
+    hen = json.loads(fetch(SRC_HIDEOUT_LANG.format(lang="en"), "hideout_en.json", refresh))["data"]
+    crafts = json.loads(fetch(SRC_CRAFTS, "crafts.json", refresh))["data"]
+    barters = json.loads(fetch(SRC_BARTERS, "barters.json", refresh))["data"]
+
+    tasks_payload = json.loads(fetch(SRC_TASKS, "tasks.json", refresh))
+    tja = json.loads(fetch(SRC_TASKS_LANG.format(lang="ja"), "tasks_ja.json", refresh))["data"]
+    ten = json.loads(fetch(SRC_TASKS_LANG.format(lang="en"), "tasks_en.json", refresh))["data"]
+
+    traders = json.loads(fetch(SRC_TRADERS, "traders.json", refresh))
+    traders = traders.get("data", traders)
+    trader_name = {
+        k: (v.get("normalizedName") or "?").replace("-", " ").title() for k, v in traders.items()
+    }
+
+    items_payload = json.loads(fetch(SRC_ITEMS, "items.json", refresh))
+    ija = json.loads(fetch(SRC_ITEMS_LANG.format(lang="ja"), "items_ja.json", refresh))["data"]
+    ien = json.loads(fetch(SRC_ITEMS_LANG.format(lang="en"), "items_en.json", refresh))["data"]
+    items = items_payload["data"]["items"]
+    items = list(items.values()) if isinstance(items, dict) else items
+    by_id = {i["id"]: i for i in items if i.get("id")}
+
+    def iname(iid):
+        it = by_id.get(iid)
+        if not it:
+            return None
+        raw = it.get("name")
+        return ija.get(raw) or ien.get(raw) or raw
+
+    def iname_en(iid):
+        it = by_id.get(iid)
+        if not it:
+            return None
+        return ien.get(it.get("name")) or it.get("name")
+
+    station = {
+        sid: (hja.get(st.get("name")) or hen.get(st.get("name")) or st.get("name"))
+        for sid, st in hideout["data"].items()
+    }
+
+    rec = {}
+
+    def slot(iid):
+        return rec.setdefault(iid, {"h": [], "t": [], "b": [], "c": [], "tool": [], "out": 0})
+
+    fir = set()
+
+    # --- ハイドアウトの建設に要るもの ---
+    for sid, st in hideout["data"].items():
+        for lv in st.get("levels") or []:
+            for r in lv.get("itemRequirements") or []:
+                if not r.get("item"):
+                    continue
+                slot(r["item"])["h"].append(
+                    [station.get(sid, "?"), lv.get("level"), r.get("count") or 1])
+                if (r.get("attributes") or {}).get("foundInRaid"):
+                    fir.add(r["item"])
+
+    # --- タスクに要るもの ---
+    #
+    # 目標の種別を絞る。usingWeapon のような「その銃で倒せ」は持ち帰る話では
+    # ないので外す。候補が ALT_CAP より多い目標は「そのうちどれか 1 つ」で、
+    # 特定のアイテムが要るとは言えないので数えない（sellItem には
+    # 候補が 3535 件のものがある）。
+    ALT_CAP = 8
+    KEEP = ("giveItem", "findItem", "plantItem")
+    tasks = tasks_payload["data"]["tasks"]
+    tasks = list(tasks.values()) if isinstance(tasks, dict) else tasks
+    for t in tasks:
+        nm = tja.get(t.get("name")) or ten.get(t.get("name")) or t.get("name")
+        seen_here = set()
+        for o in t.get("objectives") or []:
+            if o.get("type") not in KEEP:
+                continue
+            lst = o.get("items") or []
+            if not lst or len(lst) > ALT_CAP:
+                continue
+            for it in lst:
+                iid = it if isinstance(it, str) else (it or {}).get("id")
+                if not iid:
+                    continue
+                token = (iid, nm, o.get("count") or 1, len(lst))
+                if token in seen_here:
+                    continue  # 同じ課題が同じものを複数の目標で挙げることがある
+                seen_here.add(token)
+                slot(iid)["t"].append([nm, o.get("count") or 1, len(lst)])
+                if o.get("foundInRaid"):
+                    fir.add(iid)
+
+    # --- 製作 ---
+    for c in crafts:
+        prod = iname((c.get("productItem") or {}).get("item"))
+        st = station.get(c.get("station"), "?")
+        for r in c.get("requiredItems") or []:
+            if not r.get("item"):
+                continue
+            # tool は作業に使うだけで減らない。「消費する材料」と混ぜない。
+            # 個数も持たせない（持たせると「毎回 1 個要る」と誤解させる）
+            if (r.get("attributes") or {}).get("tool"):
+                slot(r["item"])["tool"].append([st, c.get("level"), prod])
+            else:
+                slot(r["item"])["c"].append([st, c.get("level"), prod, r.get("count") or 1])
+        pid = (c.get("productItem") or {}).get("item")
+        if pid:
+            slot(pid)["out"] += 1
+
+    # --- トレーダーとの交換 ---
+    for b in barters:
+        got = iname((b.get("offeredItem") or {}).get("item"))
+        for r in b.get("requiredItems") or []:
+            if not r.get("item"):
+                continue
+            slot(r["item"])["b"].append(
+                [trader_name.get(b.get("trader"), "?"), b.get("minTraderLevel"),
+                 got, r.get("count") or 1])
+
+    out = {}
+    for iid, v in rec.items():
+        if iid not in by_id:
+            continue
+        o = {"n": iname(iid)}
+        en = iname_en(iid)
+        if en and en != o["n"]:
+            o["ne"] = en
+        # shortName も翻訳キーで来る。解決できなければ出さない
+        # （"xxxxx ShortName" のような内部キーが表に出てしまう）
+        raw_short = by_id[iid].get("shortName")
+        short = ija.get(raw_short) or ien.get(raw_short)
+        if short and short != o["n"]:
+            o["s"] = short
+        for key in ("h", "t", "b", "c", "tool"):
+            if v[key]:
+                o[key] = v[key]
+        if v["out"]:
+            o["out"] = v["out"]
+        if iid in fir:
+            o["fir"] = 1
+        if by_id[iid].get("wikiLink"):
+            o["w"] = by_id[iid]["wikiLink"]
+        out[iid] = o
+
+    DATA.mkdir(parents=True, exist_ok=True)
+    write_atomic(DATA / "items.json",
+                 json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+    size = (DATA / "items.json").stat().st_size
+    kinds = {k: sum(1 for v in out.values() if v.get(k)) for k in ("h", "t", "b", "c", "tool")}
+    print(f"  アイテムの用途 {len(out)} 種 ({size/1024:.0f}KB) "
+          f"ハイドアウト {kinds['h']} / タスク {kinds['t']} / 交換 {kinds['b']} / "
+          f"製作 {kinds['c']} / 道具 {kinds['tool']} / FiR {len(fir)}", file=sys.stderr)
+    return len(out)
 
 
 def build_tasks(refresh: bool, id_to_key: dict):
@@ -793,6 +961,7 @@ def build():
         name = scene["normalizedName"]
         id_to_key[scene["id"]] = SCENE_ALIASES.get(name, name)
     task_counts = build_tasks(args.refresh, id_to_key)
+    item_count = build_items(args.refresh)
     landmark_counts = build_landmarks(
         args.refresh, api["maps"], interactive, lang_ja, lang_en,
         api.get("mobs") or {}, not args.no_keys,
@@ -954,6 +1123,8 @@ def build():
     svg_files = sorted(p.name for p in MAPS.glob("*.svg")) if MAPS.exists() else []
     any_count = task_counts.get(ANY_MAP, 0)
     db = {
+        "itemFile": "data/items.json" if item_count else None,
+        "itemCount": item_count,
         "anyTaskFile": f"data/tasks/{ANY_MAP}.json" if any_count else None,
         "anyTaskCount": any_count,
         # スキーマを変えたら上げる。loadMapDb が照合して食い違いを知らせる
@@ -1031,6 +1202,8 @@ def write_readme_summary(db: dict, task_counts: dict, landmark_counts: dict):
         ("タスク", f"延べ {task_total} 件（うちマップ非依存 {any_tasks}）",
          f"data/tasks/ {dirsize('data/tasks'):,} B"),
         ("名前の付いた地点", f"{lm_total} 件", f"data/landmarks/ {dirsize('data/landmarks'):,} B"),
+        ("アイテムの用途", f"{db.get('itemCount', 0)} 種",
+         f"data/items.json {size('data/items.json'):,} B"),
         ("メタデータ", "", f"data/mapdb.json {size('data/mapdb.json'):,} B"),
     ]
     table = ["| | | |", "|---|---|---|"]

@@ -38,6 +38,9 @@ import {
   taskKeyDoors, taskLoadout, objectiveApplies, OBJECTIVE_TYPE,
 } from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
+import {
+  loadItems, searchItems, topItems, priority, useKinds, hideoutTotal, useSummary,
+} from '../src/app/items.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
 
@@ -1244,6 +1247,109 @@ await check('目標の種類に日本語表示がある', () => {
 /* --------------------------------------------------------------------- T26 */
 
 /* --------------------------------------------------------------------- T27 */
+
+/* --------------------------------------------------------------------- T28 */
+
+group('T28 アイテムの用途');
+
+const itemDb = await loadItems('../' + db.itemFile);
+
+await check('用途データが読める', () => {
+  truthy(!itemDb.failed, `読み込みに失敗: ${itemDb.failed}`);
+  const n = Object.keys(itemDb).length;
+  eq(n, db.itemCount, 'mapdb の件数と中身が食い違う');
+  truthy(n >= 500, `アイテムが少なすぎる: ${n}`);
+  return `${n} 種`;
+});
+
+await check('表示名が内部キーのまま残っていない', () => {
+  // 上流は name も shortName も翻訳キーで返す。解決し損ねると
+  // 「5c06779c86f77426e00dd782 ShortName」のような文字列が表に出る
+  const bad = [];
+  for (const [id, it] of Object.entries(itemDb)) {
+    for (const key of ['n', 'ne', 's']) {
+      const v = it[key];
+      if (v && /[0-9a-f]{24}/.test(v)) bad.push(`${id}.${key}=${v}`);
+    }
+    if (!it.n) bad.push(`${id} に名前が無い`);
+  }
+  eq(bad.length, 0, `内部キーが残っている: ${bad.slice(0, 3).join(', ')}`);
+  return `${Object.keys(itemDb).length} 種すべて解決済み`;
+});
+
+await check('必要個数がどこに何個かまで入っている', () => {
+  // 「要る」だけでは持ち帰る判断に使えない。段階と個数が要る
+  const wires = Object.values(itemDb).find((i) => i.ne === 'Bundle of wires');
+  truthy(wires, 'ビニル絶縁電線が見つからない');
+  truthy((wires.h || []).length >= 8, `ハイドアウトの段階が少ない: ${(wires.h || []).length}`);
+  for (const [st, lv, c] of wires.h) {
+    truthy(typeof st === 'string' && st.length > 0, 'ステーション名が無い');
+    truthy(Number.isFinite(lv) && Number.isFinite(c) && c > 0, `段階か個数が壊れている: ${st} ${lv} ${c}`);
+  }
+  truthy(hideoutTotal(wires) >= 100, `合計が少ない: ${hideoutTotal(wires)}`);
+  truthy(wires.fir === 1, 'レイド発見品が必要なはず');
+  return `${wires.n}: ${wires.h.length} 段階 / 合計 ${hideoutTotal(wires)} 個`;
+});
+
+await check('候補が多すぎる目標をタスクの要求に数えない', () => {
+  // sellItem には候補が 3535 件の目標がある。「そのうちどれか 1 つ」なので
+  // 特定のアイテムが要るとは言えない。数えると 634 種が 3794 種に膨らむ
+  const bad = [];
+  for (const [id, it] of Object.entries(itemDb)) {
+    for (const [nm, , alt] of it.t || []) {
+      if (alt > 8) bad.push(`${id} ${nm} (${alt} 択)`);
+    }
+  }
+  eq(bad.length, 0, `候補が多すぎる目標が混ざっている: ${bad.slice(0, 2).join(', ')}`);
+  const withTask = Object.values(itemDb).filter((i) => (i.t || []).length).length;
+  truthy(withTask < 500, `タスク要求が多すぎる（絞れていない）: ${withTask}`);
+  return `タスクに要るもの ${withTask} 種（すべて 8 択以内）`;
+});
+
+await check('製作の道具と材料を分けている', () => {
+  // tool は作業に使うだけで減らない。材料と混ぜると「毎回 1 個要る」と
+  // 誤解させる
+  const tools = Object.values(itemDb).filter((i) => (i.tool || []).length);
+  truthy(tools.length >= 20, `道具が少なすぎる: ${tools.length}`);
+  for (const it of tools) {
+    for (const row of it.tool) truthy(row.length === 3, `道具の形が違う: ${JSON.stringify(row)}`);
+  }
+  return `${tools.length} 種が製作の道具として使われる`;
+});
+
+await check('優先度が実際の定番と一致する', () => {
+  // 「用途が多い＝常に拾え」と言われているものが上に来るか。
+  // ここが外れていると、優先度そのものが信用できない
+  const top = topItems(itemDb, 12).map((i) => i.ne || i.n);
+  const want = ['Bundle of wires', 'CPU fan', 'Printed circuit board', 'Capacitors'];
+  const miss = want.filter((w) => !top.includes(w));
+  eq(miss.length, 0, `定番が上位に来ない: ${miss.join(', ')}（上位: ${top.slice(0, 5).join(', ')}）`);
+  for (const it of topItems(itemDb, 5)) {
+    eq(priority(it).label, '必ず拾う', `${it.n} が最上位でない`);
+    truthy(useKinds(it) >= 3, `${it.n} の用途が少ない`);
+  }
+  return `上位: ${top.slice(0, 4).join(' / ')}`;
+});
+
+await check('名前で引ける（日本語・英語・半角カナ）', () => {
+  const ja = searchItems(itemDb, '電線');
+  truthy(ja.length >= 1 && ja[0].ne === 'Bundle of wires', `和名で引けない: ${ja.length} 件`);
+  eq(searchItems(itemDb, 'wires')[0].ne, 'Bundle of wires', '英語で引けない');
+  eq(searchItems(itemDb, 'ｹｸﾃｰﾌﾟ').length, searchItems(itemDb, 'ケクテープ').length,
+    '半角カナで件数が変わる');
+  eq(searchItems(itemDb, 'ぞぞぞ').length, 0, '当たらない語で結果が出る');
+  const tape = searchItems(itemDb, 'テープ');
+  truthy(tape.length >= 3, `部分一致が効いていない: ${tape.length} 件`);
+  return `電線 ${ja.length} / テープ ${tape.length} 件`;
+});
+
+await check('用途のまとめが数を言う', () => {
+  const wires = Object.values(itemDb).find((i) => i.ne === 'Bundle of wires');
+  const sum = useSummary(wires);
+  truthy(/ハイドアウト \d+ 個/.test(sum), `個数が入っていない: ${sum}`);
+  truthy(sum.includes('交換') && sum.includes('製作'), `用途が落ちている: ${sum}`);
+  return sum;
+});
 
 group('T27 鍵と施錠扉');
 
