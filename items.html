@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>アイテムの用途 — EFT 測位クライアント</title>
+<meta name="theme-color" content="#0e1112">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="manifest" href="./manifest.webmanifest">
+<style>
+:root {
+  --bg: #0e1112; --panel: #16191b; --panel-2: #1c2123; --rule: #2a3133;
+  --ink: #dce1df; --ink-2: #aab3b1; --muted: #8b9694;
+  --accent: #c79a4e; --ok: #7fa877; --warn: #c9776c; --info: #7fa6c4;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --sans: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 13px/1.7 var(--sans);
+  padding: 0 0 48px;
+}
+a { color: var(--accent); }
+
+/* ------------------------------------------------------------ 見出し */
+header {
+  position: sticky; top: 0; z-index: 20; background: var(--panel);
+  border-bottom: 1px solid var(--rule); padding: 12px 16px 10px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+h1 { margin: 0; font-size: 15px; font-weight: 600; display: flex; gap: 10px;
+     align-items: baseline; flex-wrap: wrap; }
+h1 small { font: 400 10px/1.5 var(--mono); color: var(--muted);
+           letter-spacing: .08em; text-transform: uppercase; }
+h1 a.back { margin-left: auto; font-size: 12px; }
+
+#q {
+  width: 100%; margin-top: 9px; background: var(--panel-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 8px 10px;
+  font: 14px/1.5 var(--sans);
+}
+#q:focus { outline: 1px solid var(--accent); }
+
+.tools { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; align-items: center; }
+.chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 3px 8px; font: 11px/1.6 var(--sans); color: var(--ink-2);
+}
+.chip input { margin: 0; accent-color: var(--accent); }
+.chip:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+.tools label.sel { font: 600 10px/1.6 var(--mono); letter-spacing: .08em; color: var(--muted); }
+select {
+  background: var(--panel-2); color: var(--ink); border: 1px solid var(--rule);
+  border-radius: 3px; padding: 4px 7px; font: 12px var(--sans); max-width: 210px;
+}
+#count { font: 11px/1.6 var(--mono); color: var(--muted); margin-left: auto; }
+
+/* ------------------------------------------------------------ 一覧 */
+main { max-width: 1180px; margin: 0 auto; padding: 14px 16px; }
+#grid {
+  display: grid; gap: 9px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.card {
+  display: grid; grid-template-columns: 68px 1fr; gap: 10px; text-align: left;
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 9px; cursor: pointer; color: var(--ink); font: inherit;
+}
+.card:hover { border-color: var(--accent); }
+.card .pic {
+  width: 68px; height: 68px; display: grid; place-items: center;
+  background: var(--panel-2); border-radius: 3px; overflow: hidden;
+}
+.card .pic img { max-width: 100%; max-height: 100%; display: block; }
+/* span を並べているので、block にしないと 1 行に繋がってしまう */
+.card > span:last-child { min-width: 0; }
+.card .nm { display: block; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.card .en { display: block; font: 10px/1.5 var(--mono); color: var(--muted);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .use { display: block; font-size: 11px; color: var(--ink-2);
+             margin-top: 3px; line-height: 1.5; }
+.card .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+
+.pri { font: 700 9px/1.5 var(--mono); padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
+.pri.p3 { background: #e5484d; color: #fff; }
+.pri.p2 { background: #e8c07a; color: #1a1408; }
+.pri.p1 { background: var(--panel-2); color: var(--muted); border: 1px solid var(--rule); }
+.fir { font: 700 9px/1.5 var(--mono); padding: 1px 5px; border-radius: 2px;
+       background: #3a1f28; color: #ff9db0; border: 1px solid #5d2f3c; }
+
+.empty { color: var(--muted); padding: 28px 4px; line-height: 1.9; }
+
+/* ------------------------------------------------------------ 詳細 */
+#detail[hidden] { display: none; }
+#detail {
+  position: fixed; inset: 0; z-index: 40; background: rgba(6,8,9,.72);
+  display: grid; place-items: center; padding: 20px;
+}
+#panel {
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+  max-width: 620px; width: 100%; max-height: 86vh; overflow-y: auto;
+  box-shadow: 0 18px 48px rgba(0,0,0,.6);
+}
+#panel .top { display: grid; grid-template-columns: 96px 1fr auto; gap: 13px;
+              padding: 15px; border-bottom: 1px solid var(--rule); align-items: start; }
+#panel .top .pic { width: 96px; height: 96px; display: grid; place-items: center;
+                   background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+#panel .top .pic img { max-width: 100%; max-height: 100%; }
+#panel h2 { margin: 0 0 3px; font-size: 17px; font-weight: 600; }
+#panel .en2 { font: 11px/1.6 var(--mono); color: var(--muted); }
+#panel .top .tags { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
+#close { background: transparent; border: 1px solid var(--rule); border-radius: 3px;
+         color: var(--muted); cursor: pointer; padding: 3px 9px; font: 15px/1.2 var(--mono); }
+#close:hover { color: var(--ink); border-color: var(--muted); }
+
+#panel .body { padding: 4px 15px 15px; }
+#panel section { margin-top: 13px; }
+#panel section > h3 {
+  margin: 0 0 4px; font: 600 10px/1.7 var(--mono); letter-spacing: .1em;
+  color: var(--muted); border-bottom: 1px solid var(--rule); padding-bottom: 3px;
+}
+#panel section > h3 b { color: var(--accent); font-weight: 700; }
+#panel ul { margin: 0; padding: 0; list-style: none; }
+#panel li { display: grid; grid-template-columns: 1fr auto; gap: 10px;
+            padding: 3px 0; border-bottom: 1px dotted var(--rule); font-size: 12.5px; }
+#panel li:last-child { border-bottom: 0; }
+#panel li .c { font: 600 12px/1.6 var(--mono); color: var(--accent); white-space: nowrap; }
+#panel .note { color: var(--muted); font-size: 11.5px; margin-top: 10px; line-height: 1.8; }
+#panel .wikilink { display: inline-block; margin-top: 11px; font-size: 12px; }
+
+footer { max-width: 1180px; margin: 0 auto; padding: 18px 16px;
+         color: var(--muted); font-size: 11px; line-height: 1.9;
+         border-top: 1px solid var(--rule); }
+
+@media (max-width: 560px) {
+  #grid { grid-template-columns: 1fr; }
+  #panel .top { grid-template-columns: 72px 1fr auto; }
+  #panel .top .pic { width: 72px; height: 72px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>アイテムの用途<small>what is it for</small>
+      <a class="back" href="./index.html">← 地図へ戻る</a></h1>
+    <input type="search" id="q" autocomplete="off"
+           placeholder="アイテム名で検索（電線 / wires / ｹｸﾃｰﾌﾟ …）">
+    <div class="tools">
+      <div class="chips" id="useFilter">
+        <label class="chip"><input type="checkbox" value="h"><span>ハイドアウト</span></label>
+        <label class="chip"><input type="checkbox" value="t"><span>タスク</span></label>
+        <label class="chip"><input type="checkbox" value="b"><span>交換</span></label>
+        <label class="chip"><input type="checkbox" value="c"><span>製作</span></label>
+        <label class="chip"><input type="checkbox" value="fir"><span>FiR のみ</span></label>
+      </div>
+      <label class="sel" for="cat">分類</label>
+      <select id="cat"><option value="">すべて</option></select>
+      <label class="sel" for="sort">並び</label>
+      <select id="sort">
+        <option value="pri">優先度順</option>
+        <option value="hideout">ハイドアウトで要る数</option>
+        <option value="task">タスクの件数</option>
+        <option value="name">名前順</option>
+      </select>
+      <span id="count"></span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="grid"></div>
+  <div id="empty" class="empty" hidden></div>
+</main>
+
+<footer>
+  データ元 <a href="https://tarkov.dev/" target="_blank" rel="noopener noreferrer">tarkov.dev</a>
+  （画像を含む）。ハイドアウト・タスク・トレーダーとの交換・製作の 4 つを横断して、
+  アイテム側から引けるようにしたものです。<br>
+  個数は「どの段階で何個要るか」をそのまま出しています。相場は毎日動くので出していません。<br>
+  非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
+</footer>
+
+<div id="detail" hidden>
+  <div id="panel" role="dialog" aria-modal="true" aria-labelledby="dtitle"></div>
+</div>
+
+<script type="module" src="./src/app/items-page.js"></script>
+</body>
+</html>

@@ -424,6 +424,21 @@ def build_items(refresh: bool):
         for sid, st in hideout["data"].items()
     }
 
+    # アイテムの分類。一覧を絞り込むのに使う。
+    # categories は親子構造なので、子を持たない（＝いちばん具体的な）ものを選ぶ。
+    cat_src = items_payload["data"].get("itemCategories") or {}
+    cat_by_id = {c["id"]: c for c in
+                 (cat_src.values() if isinstance(cat_src, dict) else cat_src)}
+
+    def category_of(iid):
+        groups = [cat_by_id[g] for g in (by_id[iid].get("categories") or []) if g in cat_by_id]
+        leaf = [g for g in groups if not g.get("children")]
+        pick = (leaf or groups)
+        if not pick:
+            return None
+        raw = pick[0].get("name")
+        return ija.get(raw) or ien.get(raw) or pick[0].get("normalizedName")
+
     rec = {}
 
     def slot(iid):
@@ -521,6 +536,9 @@ def build_items(refresh: bool):
             o["out"] = v["out"]
         if iid in fir:
             o["fir"] = 1
+        cat = category_of(iid)
+        if cat:
+            o["cat"] = cat
         if by_id[iid].get("wikiLink"):
             o["w"] = by_id[iid]["wikiLink"]
         out[iid] = o

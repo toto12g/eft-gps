@@ -1251,6 +1251,51 @@ await check('目標の種類に日本語表示がある', () => {
 /* --------------------------------------------------------------------- T28 */
 
 group('T28 アイテムの用途');
+await check('アイテムのページが配信物として揃っている', async () => {
+  // 一覧は情報が多いので items.html に分けた。入口・本体・読み込む JS が
+  // すべて配信されていないと、別タブを開いたときに白い画面になる
+  for (const path of ['../items.html', '../src/app/items-page.js', '../src/app/items.js']) {
+    const r = await fetch(path);
+    eq(r.status, 200, `${path} が配信されていない`);
+  }
+  const page = await fetch('../items.html').then((r) => r.text());
+  truthy(page.includes('./src/app/items-page.js'), 'ページが本体の JS を読んでいない');
+  truthy(page.includes('./index.html'), '地図へ戻る導線が無い');
+  truthy(!/(src|href)="\//.test(page), 'ルート絶対パスの参照がある（サブパス配信で壊れる）');
+
+  // Service Worker が先読みしていないと、オフラインで別タブが開けない
+  const sw = await fetch('../sw.js').then((r) => r.text());
+  for (const f of ['./items.html', './src/app/items-page.js', './src/app/items.js']) {
+    truthy(sw.includes(`'${f}'`), `${f} がプリキャッシュに無い`);
+  }
+  truthy(/db\?\.itemFile/.test(sw), 'install で itemFile を拾っていない');
+  return 'ページ・JS・プリキャッシュすべて揃っている';
+});
+
+await check('地図側はリンクだけになっている', async () => {
+  // 一覧の体裁を index.html に残したままにすると、二重管理になる
+  const page = await fetch('../index.html').then((r) => r.text());
+  truthy(page.includes('./items.html'), '地図側からアイテムのページへ行けない');
+  for (const dead of ['id="item-hits"', 'id="item-detail"', 'id="btn-item-top"']) {
+    truthy(!page.includes(dead), `別ページへ移した要素が残っている: ${dead}`);
+  }
+  const main = await fetch('../src/app/main.js').then((r) => r.text());
+  truthy(!main.includes("from './items.js'"), 'main.js が使わなくなった層を読んでいる');
+  return 'index.html は入口のみ';
+});
+
+await check('画像の URL がアイテムの ID から組み立てられる', async () => {
+  // URL をデータに持たせると 634 件で 50KB 近くになる。ID から作れるので持たない
+  const js = await fetch('../src/app/items-page.js').then((r) => r.text());
+  truthy(/assets\.tarkov\.dev\/\$\{id\}-/.test(js), 'ID から画像 URL を組み立てていない');
+  const data = await fetch('../' + db.itemFile).then((r) => r.json());
+  const withUrl = Object.values(data).filter((v) =>
+    Object.values(v).some((x) => typeof x === 'string' && x.includes('assets.tarkov.dev')));
+  eq(withUrl.length, 0, `データに画像 URL が入っている: ${withUrl.length} 件`);
+  return 'データは ID のみ / URL はページ側で組み立て';
+});
+
+
 
 const itemDb = await loadItems('../' + db.itemFile);
 

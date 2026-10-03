@@ -13,7 +13,7 @@
  * 資産は 2MB ほどしかないので、この方式でも体感は変わらない。
  */
 
-const VERSION = 'eft-gps-20261003-1933';
+const VERSION = 'eft-gps-20261003-1942';
 
 /** 最初に取り込んでおくもの。ここに無いものも、一度読めばキャッシュに入る。 */
 const PRECACHE = [
@@ -35,6 +35,8 @@ const PRECACHE = [
   './src/watch/index.js',
   './src/watch/idb.js',
   './src/app/tasks.js',
+  './items.html',
+  './src/app/items-page.js',
   './src/app/items.js',
   './src/app/landmarks.js',
   './src/app/pins.js',
