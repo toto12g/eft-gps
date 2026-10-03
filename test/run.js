@@ -1338,6 +1338,38 @@ await check('必要個数がどこに何個かまで入っている', () => {
   return `${wires.n}: ${wires.h.length} 段階 / 合計 ${hideoutTotal(wires)} 個`;
 });
 
+await check('タスク名から Wiki の該当ページへ飛べる', async () => {
+  // URL は 517 件すべて同じ接頭辞なので、データにはページ名だけを持たせ、
+  // 表示側で組み立てている。組み立てた結果が上流の wikiLink と
+  // 1 文字でも違えば、押しても別のページか 404 になる
+  const PREFIX = 'https://escapefromtarkov.fandom.com/wiki/';
+  const raw = await fetch('../tools/.cache/tasks.json').then((r) => (r.ok ? r.json() : null));
+  if (!raw) return 'ビルド用キャッシュが無いので照合を省略';
+  const tja = await fetch('../tools/.cache/tasks_ja.json').then((r) => r.json()).then((j) => j.data);
+  const ten = await fetch('../tools/.cache/tasks_en.json').then((r) => r.json()).then((j) => j.data);
+  const up = new Map();
+  const list = Array.isArray(raw.data.tasks) ? raw.data.tasks : Object.values(raw.data.tasks);
+  for (const t of list) {
+    if (!t.wikiLink) continue;
+    const nm = tja[t.name] || ten[t.name] || t.name;
+    if (!up.has(nm)) up.set(nm, new Set());
+    up.get(nm).add(t.wikiLink);
+  }
+  const rows = Object.values(itemDb).flatMap((v) => v.t || []);
+  const bad = [];
+  for (const [nm, , , slug] of rows) {
+    if (!slug) { bad.push(`${nm} にリンクが無い`); continue; }
+    if (!(up.get(nm) || new Set()).has(PREFIX + slug)) bad.push(`${nm} → ${PREFIX}${slug}`);
+  }
+  eq(bad.length, 0, `上流の wikiLink と食い違う: ${bad.slice(0, 3).join(', ')}`);
+  truthy(rows.length >= 400, `タスク行が少なすぎる: ${rows.length}`);
+
+  // 表示側が接頭辞を付けていること
+  truthy(pageJs.includes('escapefromtarkov.fandom.com/wiki/'), 'ページ側に接頭辞が無い');
+  truthy(/rel="noopener noreferrer"/.test(pageJs), '外部リンクに rel が付いていない');
+  return `${rows.length} 行すべてが上流の wikiLink と一致`;
+});
+
 await check('候補が多すぎる目標をタスクの要求に数えない', () => {
   // sellItem には候補が 3535 件の目標がある。「そのうちどれか 1 つ」なので
   // 特定のアイテムが要るとは言えない。数えると 634 種が 3794 種に膨らむ

@@ -465,10 +465,16 @@ def build_items(refresh: bool):
     # 候補が 3535 件のものがある）。
     ALT_CAP = 8
     KEEP = ("giveItem", "findItem", "plantItem")
+    # Wiki の URL は 517 件すべてが同じ接頭辞なので、末尾だけを持つ。
+    # 丸ごと持つと 1 件あたり 42 文字の無駄になる
+    WIKI_PREFIX = "https://escapefromtarkov.fandom.com/wiki/"
+
     tasks = tasks_payload["data"]["tasks"]
     tasks = list(tasks.values()) if isinstance(tasks, dict) else tasks
     for t in tasks:
         nm = tja.get(t.get("name")) or ten.get(t.get("name")) or t.get("name")
+        link = t.get("wikiLink") or ""
+        slug = link[len(WIKI_PREFIX):] if link.startswith(WIKI_PREFIX) else ""
         seen_here = set()
         for o in t.get("objectives") or []:
             if o.get("type") not in KEEP:
@@ -484,7 +490,7 @@ def build_items(refresh: bool):
                 if token in seen_here:
                     continue  # 同じ課題が同じものを複数の目標で挙げることがある
                 seen_here.add(token)
-                slot(iid)["t"].append([nm, o.get("count") or 1, len(lst)])
+                slot(iid)["t"].append([nm, o.get("count") or 1, len(lst), slug])
                 if o.get("foundInRaid"):
                     fir.add(iid)
 

@@ -125,6 +125,10 @@ main { max-width: 1180px; margin: 0 auto; padding: 14px 16px; }
             padding: 3px 0; border-bottom: 1px dotted var(--rule); font-size: 12.5px; }
 #panel li:last-child { border-bottom: 0; }
 #panel li .c { font: 600 12px/1.6 var(--mono); color: var(--accent); white-space: nowrap; }
+/* Wiki へ飛べる行。下線で「押せる」ことが分かるようにする */
+#panel li a { color: var(--ink); text-decoration: underline;
+              text-decoration-color: var(--rule); text-underline-offset: 2px; }
+#panel li a:hover { color: var(--accent); text-decoration-color: var(--accent); }
 #panel .note { color: var(--muted); font-size: 11.5px; margin-top: 10px; line-height: 1.8; }
 #panel .wikilink { display: inline-block; margin-top: 11px; font-size: 12px; }
 

@@ -25,6 +25,8 @@ const state = {
 
 /** 在庫画像の URL。ID から組み立てる。 */
 const gridImage = (id) => `https://assets.tarkov.dev/${id}-grid-image.webp`;
+/** タスクの Wiki。データにはページ名だけを持たせている */
+const WIKI = 'https://escapefromtarkov.fandom.com/wiki/';
 const bigImage = (id) => `https://assets.tarkov.dev/${id}-base-image.webp`;
 
 const escapeHtml = (s) =>
@@ -164,12 +166,18 @@ function openDetail(id) {
   if (!it) return;
   const panel = $('panel');
 
+  // what に href を添えると、その行を Wiki へのリンクにする
   const section = (title, total, rows) => {
     if (!rows.length) return '';
     const sum = total !== undefined ? ` 合計 <b>${total} 個</b>` : '';
     return `<section><h3>${title}${sum}</h3><ul>` +
-      rows.map(([what, c]) =>
-        `<li><span>${escapeHtml(what)}</span><span class="c">${escapeHtml(c)}</span></li>`).join('') +
+      rows.map(([what, c, href]) => {
+        const label = href
+          ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer"
+               >${escapeHtml(what)}</a>`
+          : escapeHtml(what);
+        return `<li><span>${label}</span><span class="c">${escapeHtml(c)}</span></li>`;
+      }).join('') +
       '</ul></section>';
   };
 
@@ -190,7 +198,11 @@ function openDetail(id) {
     section('ハイドアウトの建設', hideoutTotal(it),
       (it.h || []).map(([st, lv, c]) => [`${st} Lv${lv}`, `${c} 個`])) +
     section('タスク', undefined,
-      (it.t || []).map(([nm, c, alt]) => [nm, alt > 1 ? `${c} 個（${alt} 択）` : `${c} 個`])) +
+      (it.t || []).map(([nm, c, alt, slug]) => [
+        nm,
+        alt > 1 ? `${c} 個（${alt} 択）` : `${c} 個`,
+        slug ? WIKI + slug : null,
+      ])) +
     section('トレーダーとの交換で渡す', undefined,
       (it.b || []).map(([tr, lv, got, c]) => [`${tr} Lv${lv} → ${got}`, `${c} 個`])) +
     section('製作の材料', undefined,
