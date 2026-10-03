@@ -8,7 +8,7 @@
 
 import { loadMapDb } from '../mapdb/index.js';
 import {
-  loadItems, searchItems, priority, useKinds, hideoutTotal, useSummary,
+  loadItems, searchItems, useKinds, hideoutTotal, useSummary,
 } from './items.js';
 import { normalizeQuery } from './tasks.js';
 
@@ -20,7 +20,7 @@ const state = {
   query: '',
   uses: new Set(),
   cat: '',
-  sort: 'pri',
+  sort: 'uses',
 };
 
 /** 在庫画像の URL。ID から組み立てる。 */
@@ -101,13 +101,13 @@ function filtered() {
 
   const byName = (a, b) => String(a.n).localeCompare(String(b.n), 'ja');
   const sorters = {
-    pri: (a, b) => priority(b).rank - priority(a).rank
-      || useKinds(b) - useKinds(a) || hideoutTotal(b) - hideoutTotal(a) || byName(a, b),
+    uses: (a, b) => useKinds(b) - useKinds(a)
+      || hideoutTotal(b) - hideoutTotal(a) || byName(a, b),
     hideout: (a, b) => hideoutTotal(b) - hideoutTotal(a) || byName(a, b),
     task: (a, b) => (b.t || []).length - (a.t || []).length || byName(a, b),
     name: byName,
   };
-  rows.sort(sorters[state.sort] || sorters.pri);
+  rows.sort(sorters[state.sort] || sorters.uses);
   return rows;
 }
 
@@ -141,7 +141,6 @@ function render() {
 }
 
 function card(it) {
-  const p = priority(it);
   const el = document.createElement('button');
   el.type = 'button';
   el.className = 'card';
@@ -153,8 +152,7 @@ function card(it) {
     `<span class="nm">${escapeHtml(it.n)}</span>` +
     `<span class="en">${escapeHtml(it.ne || it.s || '')}</span>` +
     `<span class="use">${escapeHtml(useSummary(it))}</span>` +
-    `<span class="tags"><span class="pri ${p.cls}">${p.label}</span>` +
-    (it.fir ? '<span class="fir">FiR</span>' : '') + `</span>` +
+    (it.fir ? '<span class="tags"><span class="fir">FiR</span></span>' : '') +
     `</span>`;
   return el;
 }
@@ -164,7 +162,6 @@ function card(it) {
 function openDetail(id) {
   const it = state.items[id];
   if (!it) return;
-  const p = priority(it);
   const panel = $('panel');
 
   const section = (title, total, rows) => {
@@ -184,7 +181,7 @@ function openDetail(id) {
          <h2 id="dtitle">${escapeHtml(it.n)}</h2>
          <div class="en2">${escapeHtml(it.ne || '')}${it.s ? ` / ${escapeHtml(it.s)}` : ''}` +
          `${it.cat ? ` ・ ${escapeHtml(it.cat)}` : ''}</div>
-         <div class="tags"><span class="pri ${p.cls}">${p.label}</span>` +
+         <div class="tags">` +
          (it.fir ? '<span class="fir">レイド発見品(FiR)が必要</span>' : '') + `</div>
        </div>
        <button type="button" id="close" aria-label="閉じる">×</button>

@@ -39,7 +39,7 @@ import {
 } from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
 import {
-  loadItems, searchItems, topItems, priority, useKinds, hideoutTotal, useSummary,
+  loadItems, searchItems, topItems, useKinds, hideoutTotal, useSummary,
 } from '../src/app/items.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
@@ -1298,6 +1298,8 @@ await check('画像の URL がアイテムの ID から組み立てられる', a
 
 
 const itemDb = await loadItems('../' + db.itemFile);
+const pageHtml = await fetch('../items.html').then((r) => r.text());
+const pageJs = await fetch('../src/app/items-page.js').then((r) => r.text());
 
 await check('用途データが読める', () => {
   truthy(!itemDb.failed, `読み込みに失敗: ${itemDb.failed}`);
@@ -1362,18 +1364,27 @@ await check('製作の道具と材料を分けている', () => {
   return `${tools.length} 種が製作の道具として使われる`;
 });
 
-await check('優先度が実際の定番と一致する', () => {
-  // 「用途が多い＝常に拾え」と言われているものが上に来るか。
-  // ここが外れていると、優先度そのものが信用できない
+await check('既定の並びで、用途の多いものが上に来る', () => {
+  // 「拾うべき」という判断は出さない。代わりに事実（用途の数）で並べる。
+  // その並びが実際に使われるものを拾えているかを見る
   const top = topItems(itemDb, 12).map((i) => i.ne || i.n);
   const want = ['Bundle of wires', 'CPU fan', 'Printed circuit board', 'Capacitors'];
   const miss = want.filter((w) => !top.includes(w));
-  eq(miss.length, 0, `定番が上位に来ない: ${miss.join(', ')}（上位: ${top.slice(0, 5).join(', ')}）`);
+  eq(miss.length, 0, `上位に来ない: ${miss.join(', ')}（上位: ${top.slice(0, 5).join(', ')}）`);
   for (const it of topItems(itemDb, 5)) {
-    eq(priority(it).label, '必ず拾う', `${it.n} が最上位でない`);
     truthy(useKinds(it) >= 3, `${it.n} の用途が少ない`);
   }
   return `上位: ${top.slice(0, 4).join(' / ')}`;
+});
+
+await check('拾うべきかどうかの判断を表に出していない', () => {
+  // 判断は押しつけず、何に何個要るかだけを出す
+  for (const word of ['必ず拾う', '拾う価値あり', '使い道はある', '優先度']) {
+    truthy(!pageHtml.includes(word), `items.html に「${word}」が残っている`);
+    truthy(!pageJs.includes(word), `items-page.js に「${word}」が残っている`);
+  }
+  truthy(pageHtml.includes('FiR'), 'FiR の表示まで消えている（これは事実なので残す）');
+  return '判断の文言なし / FiR の表示は残っている';
 });
 
 await check('名前で引ける（日本語・英語・半角カナ）', () => {

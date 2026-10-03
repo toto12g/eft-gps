@@ -85,10 +85,6 @@ main { max-width: 1180px; margin: 0 auto; padding: 14px 16px; }
              margin-top: 3px; line-height: 1.5; }
 .card .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
 
-.pri { font: 700 9px/1.5 var(--mono); padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
-.pri.p3 { background: #e5484d; color: #fff; }
-.pri.p2 { background: #e8c07a; color: #1a1408; }
-.pri.p1 { background: var(--panel-2); color: var(--muted); border: 1px solid var(--rule); }
 .fir { font: 700 9px/1.5 var(--mono); padding: 1px 5px; border-radius: 2px;
        background: #3a1f28; color: #ff9db0; border: 1px solid #5d2f3c; }
 
@@ -163,7 +159,7 @@ footer { max-width: 1180px; margin: 0 auto; padding: 18px 16px;
       <select id="cat"><option value="">すべて</option></select>
       <label class="sel" for="sort">並び</label>
       <select id="sort">
-        <option value="pri">優先度順</option>
+        <option value="uses">用途の多い順</option>
         <option value="hideout">ハイドアウトで要る数</option>
         <option value="task">タスクの件数</option>
         <option value="name">名前順</option>
@@ -182,7 +178,8 @@ footer { max-width: 1180px; margin: 0 auto; padding: 18px 16px;
   データ元 <a href="https://tarkov.dev/" target="_blank" rel="noopener noreferrer">tarkov.dev</a>
   （画像を含む）。ハイドアウト・タスク・トレーダーとの交換・製作の 4 つを横断して、
   アイテム側から引けるようにしたものです。<br>
-  個数は「どの段階で何個要るか」をそのまま出しています。相場は毎日動くので出していません。<br>
+  個数は「どの段階で何個要るか」をそのままの形で出しています。
+  拾うべきかどうかの判断は入れていません。相場は毎日動くので出していません。<br>
   非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
 </footer>
 

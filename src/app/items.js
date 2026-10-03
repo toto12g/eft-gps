@@ -44,22 +44,6 @@ export function useKinds(item) {
   return ['h', 't', 'b', 'c'].filter((k) => (item[k] || []).length).length;
 }
 
-/**
- * 持ち帰る優先度。
- *
- * 用途の数を軸にして、レイド発見品が要るものを一段上げる。
- * FiR はフリーマーケットで買えないので、見つけたその場で拾うしかない。
- * @returns {{rank:number, label:string, cls:string}}
- */
-export function priority(item) {
-  const kinds = useKinds(item);
-  const score = kinds + (item.fir ? 1 : 0);
-  if (score >= 4) return { rank: 3, label: '必ず拾う', cls: 'p3' };
-  if (score >= 2) return { rank: 2, label: '拾う価値あり', cls: 'p2' };
-  if (score >= 1) return { rank: 1, label: '使い道はある', cls: 'p1' };
-  return { rank: 0, label: '用途なし', cls: 'p0' };
-}
-
 /** ハイドアウトで要る総数。 */
 export function hideoutTotal(item) {
   return (item.h || []).reduce((n, [, , c]) => n + (c || 0), 0);
@@ -85,19 +69,20 @@ export function searchItems(items, query, limit = 30) {
     if (!terms.every((t) => hay.includes(t))) continue;
     out.push({ id, ...it });
   }
-  // 用途が多いものを先に。同じなら名前順
-  out.sort((a, b) => priority(b).rank - priority(a).rank
+  // 用途が多いものを先に。同じなら名前順。
+  // 「必ず拾う」のような判断は出さない。何に何個要るかを見て決めてもらう
+  out.sort((a, b) => useKinds(b) - useKinds(a)
     || hideoutTotal(b) - hideoutTotal(a)
     || String(a.n).localeCompare(String(b.n), 'ja'));
   return out.slice(0, limit);
 }
 
-/** 「必ず拾う」ものを上から並べる。何を覚えればいいか分からない人向け。 */
+/** 用途の多い順に並べる。 */
 export function topItems(items, limit = 40) {
   const out = Object.entries(items).map(([id, it]) => ({ id, ...it }));
-  out.sort((a, b) => priority(b).rank - priority(a).rank
-    || useKinds(b) - useKinds(a)
-    || hideoutTotal(b) - hideoutTotal(a));
+  out.sort((a, b) => useKinds(b) - useKinds(a)
+    || hideoutTotal(b) - hideoutTotal(a)
+    || String(a.n).localeCompare(String(b.n), 'ja'));
   return out.slice(0, limit);
 }
 
