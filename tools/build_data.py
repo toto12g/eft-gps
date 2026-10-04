@@ -439,6 +439,9 @@ def build_items(refresh: bool):
         raw = pick[0].get("name")
         return ija.get(raw) or ien.get(raw) or pick[0].get("normalizedName")
 
+    # tarkov.dev のアイテムページ。相場はここで見てもらう
+    DEV_PREFIX = "https://tarkov.dev/item/"
+
     rec = {}
 
     def slot(iid):
@@ -545,8 +548,17 @@ def build_items(refresh: bool):
         cat = category_of(iid)
         if cat:
             o["cat"] = cat
-        if by_id[iid].get("wikiLink"):
-            o["w"] = by_id[iid]["wikiLink"]
+        # 相場は持たない。毎日動くのにこのツールのデータは手動ビルドで止まるため、
+        # 古い数字を自信ありげに出すと判断を誤らせる。
+        # 代わりに tarkov.dev の該当ページへ送り、価格は向こうで見てもらう。
+        # URL は 5312 件すべてが同じ接頭辞なので、末尾だけを持つ。
+        dev_link = by_id[iid].get("link") or ""
+        if dev_link.startswith(DEV_PREFIX):
+            o["dev"] = dev_link[len(DEV_PREFIX):]
+        # Wiki の URL もタスクと同じ形にする（接頭辞は共通なので末尾だけ）
+        wiki = by_id[iid].get("wikiLink") or ""
+        if wiki.startswith(WIKI_PREFIX):
+            o["w"] = wiki[len(WIKI_PREFIX):]
         out[iid] = o
 
     DATA.mkdir(parents=True, exist_ok=True)

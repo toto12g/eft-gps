@@ -130,7 +130,9 @@ main { max-width: 1180px; margin: 0 auto; padding: 14px 16px; }
               text-decoration-color: var(--rule); text-underline-offset: 2px; }
 #panel li a:hover { color: var(--accent); text-decoration-color: var(--accent); }
 #panel .note { color: var(--muted); font-size: 11.5px; margin-top: 10px; line-height: 1.8; }
-#panel .wikilink { display: inline-block; margin-top: 11px; font-size: 12px; }
+#panel .links { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 13px;
+                padding-top: 11px; border-top: 1px solid var(--rule); }
+#panel .links a { font-size: 12px; }
 
 footer { max-width: 1180px; margin: 0 auto; padding: 18px 16px;
          color: var(--muted); font-size: 11px; line-height: 1.9;
@@ -183,7 +185,9 @@ footer { max-width: 1180px; margin: 0 auto; padding: 18px 16px;
   （画像を含む）。ハイドアウト・タスク・トレーダーとの交換・製作の 4 つを横断して、
   アイテム側から引けるようにしたものです。<br>
   個数は「どの段階で何個要るか」をそのままの形で出しています。
-  拾うべきかどうかの判断は入れていません。相場は毎日動くので出していません。<br>
+  拾うべきかどうかの判断は入れていません。<br>
+  相場は毎日動くので、このページでは持たずに tarkov.dev の該当ページへ送っています。
+  そちらなら常に最新の値が出ます。<br>
   非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
 </footer>
 

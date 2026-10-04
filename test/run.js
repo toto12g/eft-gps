@@ -1338,6 +1338,39 @@ await check('必要個数がどこに何個かまで入っている', () => {
   return `${wires.n}: ${wires.h.length} 段階 / 合計 ${hideoutTotal(wires)} 個`;
 });
 
+await check('相場は持たず、tarkov.dev の該当ページへ送っている', async () => {
+  // 相場は毎日動くのに、このツールのデータは手動ビルドで止まる。
+  // 古い数字を自信ありげに出すのは、何も出さないより悪い。
+  // だから値は持たず、常に最新が出る向こうのページへ送る。
+  const DEV = 'https://tarkov.dev/item/';
+  const WIKI = 'https://escapefromtarkov.fandom.com/wiki/';
+  const raw = await fetch('../tools/.cache/items.json').then((r) => (r.ok ? r.json() : null));
+  if (!raw) return 'ビルド用キャッシュが無いので照合を省略';
+  const list = Array.isArray(raw.data.items) ? raw.data.items : Object.values(raw.data.items);
+  const up = new Map(list.map((i) => [i.id, i]));
+
+  const bad = [];
+  let linked = 0;
+  for (const [id, it] of Object.entries(itemDb)) {
+    const src = up.get(id);
+    if (!src) continue;
+    if (!it.dev) { bad.push(`${it.n} にリンクが無い`); continue; }
+    if (DEV + it.dev !== src.link) bad.push(`${it.n}: ${DEV}${it.dev} ≠ ${src.link}`);
+    if (it.w && WIKI + it.w !== src.wikiLink) bad.push(`${it.n} の Wiki が違う`);
+    linked++;
+  }
+  eq(bad.length, 0, `上流の link と食い違う: ${bad.slice(0, 3).join(', ')}`);
+  eq(linked, Object.keys(itemDb).length, 'リンクの無いアイテムがある');
+
+  // 値そのものを持ち込んでいないこと。持つと古くなる
+  for (const key of ['avg24hPrice', 'lastLowPrice', 'basePrice', 'flea', 'price']) {
+    const has = Object.values(itemDb).filter((v) => v[key] !== undefined);
+    eq(has.length, 0, `相場を抱え込んでいる: ${key} が ${has.length} 件`);
+  }
+  truthy(pageJs.includes('tarkov.dev/item/'), 'ページ側にリンクの組み立てが無い');
+  return `${linked} 件すべてが上流の link と一致 / 価格は 1 件も持たない`;
+});
+
 await check('タスク名から Wiki の該当ページへ飛べる', async () => {
   // URL は 517 件すべて同じ接頭辞なので、データにはページ名だけを持たせ、
   // 表示側で組み立てている。組み立てた結果が上流の wikiLink と

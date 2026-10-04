@@ -27,6 +27,11 @@ const state = {
 const gridImage = (id) => `https://assets.tarkov.dev/${id}-grid-image.webp`;
 /** タスクの Wiki。データにはページ名だけを持たせている */
 const WIKI = 'https://escapefromtarkov.fandom.com/wiki/';
+/**
+ * tarkov.dev のアイテムページ。
+ * 相場はこちらでは持たず、常に最新が出る向こうへ送る。
+ */
+const DEV = 'https://tarkov.dev/item/';
 const bigImage = (id) => `https://assets.tarkov.dev/${id}-base-image.webp`;
 
 const escapeHtml = (s) =>
@@ -218,9 +223,12 @@ function openDetail(id) {
       ? '<div class="note">レイド発見品(FiR)が要るものはフリーマーケットで買えません。'
         + '見つけたその場で拾う必要があります。</div>'
       : '') +
-    (it.w ? `<a class="wikilink" href="${escapeHtml(it.w)}" target="_blank"
+    `<div class="links">` +
+    (it.dev ? `<a href="${DEV}${escapeHtml(it.dev)}" target="_blank"
+               rel="noopener noreferrer">tarkov.dev で現在の相場を見る</a>` : '') +
+    (it.w ? `<a href="${WIKI}${escapeHtml(it.w)}" target="_blank"
                rel="noopener noreferrer">Wiki で詳しく見る</a>` : '') +
-    '</div>';
+    `</div></div>`;
 
   $('detail').hidden = false;
   $('close').focus();
