@@ -209,6 +209,7 @@ async function boot() {
   setupGuide();
   setupPins();
   setupSidebar();
+  setupSections();
   setupExport();
   setupKeys();
   setupItems();
@@ -924,6 +925,36 @@ function compassText(worldDeg, digits = 0) {
  * 畳んだ状態は覚えておく。Leaflet は自分でサイズ変化に気づけないので、
  * 切り替えのたびに invalidateSize を呼ぶ。
  */
+/**
+ * 折りたためる欄（details）の開閉を覚える。
+ * 畳んだ欄の見出しには、中の状態（フォルダの接続など）を写して出す。
+ */
+function setupSections() {
+  const saved = safeParse('eft-gps.sections', {});
+  for (const el of document.querySelectorAll('details[data-sec]')) {
+    const key = el.dataset.sec;
+    if (key in saved) el.open = !!saved[key];
+    el.addEventListener('toggle', () => {
+      saved[key] = el.open;
+      try {
+        localStorage.setItem('eft-gps.sections', JSON.stringify(saved));
+      } catch { /* 保存できなくても動作には影響しない */ }
+    });
+  }
+  for (const note of document.querySelectorAll('[data-mirror]')) {
+    const src = $(note.dataset.mirror);
+    if (!src) continue;
+    const copy = () => {
+      note.textContent = src.textContent.trim();
+      note.className = 'sum-note ' + [...src.classList].filter((c) => c !== 'status').join(' ');
+    };
+    copy();
+    new MutationObserver(copy).observe(src, {
+      childList: true, characterData: true, subtree: true, attributes: true,
+    });
+  }
+}
+
 function setupSidebar() {
   const btn = $('btn-side');
   const show = $('btn-side-show');

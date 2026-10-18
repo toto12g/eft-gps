@@ -345,6 +345,22 @@ export function taskLoadout(task, mapKey) {
   };
 }
 
+/**
+ * 地図のラベル用に目標文を短くする。
+ *
+ * 「Customs で old gas station の Scav を…」のように、いま開いているマップの
+ * 名前から始まる目標が多い（全マップで 400 件以上）。地図のラベルは途中で
+ * 切れるので、分かりきったマップ名を落として肝心の場所を見せる。
+ * 「Customs か Lighthouse で」のように複数のマップを挙げるものは残す。
+ */
+export function shortObjectiveText(text, mapName) {
+  const d = String(text || '');
+  if (!mapName) return d;
+  const esc = mapName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const short = d.replace(new RegExp(`^${esc}\\s*(?:の|で|にある)\\s*`, 'i'), '');
+  return short || d;
+}
+
 /** 一覧に出すラベル。 */
 export function taskLabel(task) {
   if (task.story) return `[ストーリー] ${task.n}`;

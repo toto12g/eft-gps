@@ -356,6 +356,24 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
 
     out_dir = DATA / "landmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 上流で施錠扉がごっそり抜けることがある（2026-10 に Interchange が 101 → 15 件）。
+    # 扉はゲーム側でそう変わるものではないので、前回の半分を割ったら抜けとみなし、
+    # 前回の扉を残す。鍵の一覧と「この鍵で開く扉」が急に空になるのを防ぐ。
+    for key, groups in out.items():
+        prev_path = out_dir / f"{key}.json"
+        if not prev_path.exists():
+            continue
+        try:
+            prev_locks = json.loads(prev_path.read_text(encoding="utf-8")).get("lock") or []
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        now = len(groups.get("lock") or [])
+        if len(prev_locks) >= 20 and now < len(prev_locks) / 2:
+            groups["lock"] = prev_locks
+            print(f"  !! {key} の施錠扉が {len(prev_locks)} → {now} 件に減ったので、前回の扉を残します",
+                  file=sys.stderr)
+
     for stale in out_dir.glob("*.json"):
         stale.unlink()
 
@@ -573,6 +591,32 @@ def build_items(refresh: bool):
     return len(out)
 
 
+def fix_swapped_verbs(payload: dict, ja: dict, en: dict):
+    """上流の和訳で「渡す」と「手に入れる」が入れ替わっている目標を直す。
+
+    A Bitter Victory では "Obtain the item: Rye croutons" が「ライ麦クルトン を渡す」、
+    "Hand over the item: Rye croutons" が「… を手に入れる」になっていた。
+    英語の原文の動詞を正として、食い違うものだけ動詞を差し替える。
+    ja は書き換えずに写しを返す。
+    """
+    tasks = payload["data"]["tasks"]
+    tasks = tasks.values() if isinstance(tasks, dict) else tasks
+    fixed = dict(ja)
+    count = 0
+    for t in tasks:
+        for o in t.get("objectives") or []:
+            key = o.get("description")
+            e, j = en.get(key) or "", ja.get(key) or ""
+            if e.startswith("Hand over") and "手に入れる" in j and "渡" not in j:
+                fixed[key] = j.replace("を手に入れる", "を渡す").replace("手に入れる", "渡す")
+            elif e.startswith(("Obtain", "Find")) and "渡す" in j and "手に入れる" not in j and "見つけ" not in j:
+                fixed[key] = j.replace("を渡す", "を手に入れる").replace("渡す", "手に入れる")
+            else:
+                continue
+            count += 1
+    return fixed, count
+
+
 def build_tasks(refresh: bool, id_to_key: dict):
     """クエストの目標地点をマップごとに切り出す。
 
@@ -588,8 +632,9 @@ def build_tasks(refresh: bool, id_to_key: dict):
     # 上流の ja 辞書には課題名の和訳が 1 件も無く（517 件すべて英語が返る）、
     # 課題名は常に英語になる。逆に目標の description は和訳されている。
     # つまり検索は「英語の課題名」と「日本語の目標文」の両方に当たる必要がある。
+    ja, swapped = fix_swapped_verbs(payload, ja, en)
     n = apply_translations(payload, ja, en)
-    print(f"  タスクの表示名を解決: {n} 件", file=sys.stderr)
+    print(f"  タスクの表示名を解決: {n} 件（訳の入れ替わりを直した {swapped} 件）", file=sys.stderr)
 
     traders = json.loads(fetch(SRC_TRADERS, "traders.json", refresh))
     traders = traders.get("data", traders)
@@ -1183,6 +1228,19 @@ def build():
         raw, dropped = drop_outliers(m["points"], interactive.get(key))
         dropped_total += dropped
         m["dropped"] = dropped
+        # 地図の範囲から大きく外れた脱出口は載せない。2026-10 に Ground Zero の
+        # UN Roadblock と Scav Bunker が範囲の数百 m 外の座標で入ってきた。
+        # 地図画像に無い場所なので、描いても地図の外に浮いた印にしかならない
+        td_here = interactive.get(key)
+        if td_here:
+            kept = []
+            for e in m.get("extracts") or []:
+                p = e.get("position") or {}
+                if all(k in p for k in "xyz") and not drop_outliers([(p["x"], p["y"], p["z"])], td_here)[0]:
+                    print(f"  !! {key} の脱出口「{e.get('name')}」は地図の範囲外なので載せません", file=sys.stderr)
+                    continue
+                kept.append(e)
+            m["extracts"] = kept
         pts = list(quantize(raw))
         if not pts:
             print(f"  skip {key}: 位置データなし", file=sys.stderr)

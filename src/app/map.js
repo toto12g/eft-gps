@@ -11,6 +11,7 @@
  */
 
 import { SIDE_COLOR, layerKeys } from './landmarks.js';
+import { shortObjectiveText } from './tasks.js';
 import { applyAffine, worldToLatLng, latLngToWorld, headingToScreenDeg, bearingDeg } from '../geo/index.js';
 
 /** 陣営ごとの色。地図の配色 (青緑・灰・カーキ) から浮くものを選んでいる。 */
@@ -371,6 +372,8 @@ export class MapView {
       const spots = [];
       for (const loc of objective.l || []) if (loc.m === mapKey) spots.push(...loc.p);
       const label = `${i + 1}. ${objective.d || ''}`;
+      // ラベルは途中で切れるので、分かりきったマップ名を落とす（ツールチップは全文）
+      const text = shortObjectiveText(objective.d, this.mapData.name);
 
       // 同じ目標が何十箇所もあることがある（BTR の停車地点など）。
       // そこに毎回説明文を描くと地図が文字で埋まって読めなくなるので、
@@ -389,7 +392,7 @@ export class MapView {
             className: 'task-icon',
             html:
               `<span class="num">${i + 1}</span>` +
-              (showText ? `<span class="label">${escapeHtml(objective.d || '')}</span>` : ''),
+              (showText ? `<span class="label">${escapeHtml(text)}</span>` : ''),
             iconSize: [0, 0],
           }),
           zIndexOffset: 700,
@@ -411,7 +414,7 @@ export class MapView {
             className: 'task-icon task-spot',
             html:
               `<span class="num">${i + 1}</span>` +
-              (spots.length <= 2 ? `<span class="label">${escapeHtml(objective.d || '')}</span>` : ''),
+              (spots.length <= 2 ? `<span class="label">${escapeHtml(text)}</span>` : ''),
             iconSize: [0, 0],
           }),
           zIndexOffset: 690,

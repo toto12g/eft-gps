@@ -22,7 +22,7 @@ html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--ink);
   font: 13px/1.7 var(--sans); display: grid;
-  grid-template-columns: 340px 1fr; overflow: hidden;
+  grid-template-columns: 360px 1fr; overflow: hidden;
 }
 
 /* ------------------------------------------------------------- sidebar */
@@ -32,10 +32,10 @@ body {
 h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 h1 small { display: block; font: 400 10px/1.5 var(--mono); color: var(--muted);
            letter-spacing: .08em; text-transform: uppercase; margin-top: 3px; }
-label { display: block; font: 600 10px/1.6 var(--mono); letter-spacing: .1em;
+label { display: block; font: 600 11px/1.6 var(--mono); letter-spacing: .1em;
         text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
 select, input, button, textarea {
-  font: 12px/1.5 var(--mono); color: var(--ink); background: var(--panel-2);
+  font: 13px/1.5 var(--mono); color: var(--ink); background: var(--panel-2);
   border: 1px solid var(--rule); border-radius: 2px; padding: 6px 8px; width: 100%;
 }
 select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-visible {
@@ -46,10 +46,10 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .field + .field { margin-top: 10px; }
 .btn-row { display: flex; gap: 8px; margin-top: 8px; }
 
-#map-info, #attrib { font: 11px/1.6 var(--mono); color: var(--muted); }
+#map-info, #attrib { font: 12px/1.6 var(--mono); color: var(--muted); }
 #map-missing { color: var(--warn); font-size: 12px; margin-top: 8px; }
 
-.status { font: 12px/1.5 var(--mono); padding: 8px 10px; border-radius: 2px;
+.status { font: 13px/1.5 var(--mono); padding: 8px 10px; border-radius: 2px;
           border-left: 3px solid var(--muted); background: var(--panel-2); }
 .status.ok   { border-left-color: var(--ok);     color: var(--ok); }
 .status.warn { border-left-color: var(--warn);   color: var(--warn); }
@@ -58,28 +58,57 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .status.idle { border-left-color: var(--rule);   color: var(--muted); }
 
 #sample .row { display: grid; grid-template-columns: 84px 1fr; gap: 8px; padding: 2px 0; }
-#sample .k { font: 600 10px/1.9 var(--mono); letter-spacing: .06em; color: var(--muted); }
-#sample .v { font: 12px/1.6 var(--mono); word-break: break-all; }
-#sample .hint { color: var(--muted); font-size: 12px; }
+#sample .k { font: 600 11px/1.9 var(--mono); letter-spacing: .06em; color: var(--muted); }
+#sample .v { font: 13px/1.6 var(--mono); word-break: break-all; }
+#sample .hint { color: var(--muted); font-size: 13px; }
 
 #clock { display: flex; justify-content: space-between; align-items: baseline; }
 #world-clock { font: 600 13px/1 var(--mono); color: var(--accent); }
 
-.safety { font-size: 11px; color: var(--muted); line-height: 1.7; }
+.safety { font-size: 12px; color: var(--muted); line-height: 1.7; }
 .safety b { color: var(--ink-2); font-weight: 600; }
-.safety code { font: 10px/1.5 var(--mono); color: var(--ink-2); word-break: break-all; }
-.muted-line { font: 11px/1.8 var(--mono); color: var(--muted); min-height: 18px; }
+.safety code { font: 11px/1.5 var(--mono); color: var(--ink-2); word-break: break-all; }
+.muted-line { font: 12px/1.8 var(--mono); color: var(--muted); min-height: 18px; }
 /* 現在地の古さ。撮り忘れたまま動いているのが最も危ない誤りなので、常に出す */
-.age { font: 600 12px/1.6 var(--mono); margin-top: 6px; min-height: 19px; }
+.age { font: 600 13px/1.6 var(--mono); margin-top: 6px; min-height: 19px; }
 .age:empty { display: none; }
 .age.fresh { color: var(--ok); }
 .age.aging { color: var(--accent); }
 .age.stale { color: var(--warn); }
 label.check { display: flex; gap: 7px; align-items: flex-start; margin-top: 8px;
-              font: 400 11px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
+              font: 400 12px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
               color: var(--ink-2); cursor: pointer; }
 label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
 #side > .grow { flex: 1; border-bottom: 0; }
+
+/* 折りたためる欄。見出しを押すと開閉し、状態は localStorage に残す */
+details.sec > summary, details.about > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px;
+  font: 600 11px/1.6 var(--mono); letter-spacing: .1em; color: var(--muted);
+}
+details.sec > summary::-webkit-details-marker,
+details.about > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before, details.about > summary::before {
+  content: '▸'; flex: none; width: 10px; color: var(--muted);
+}
+details.sec[open] > summary::before, details.about[open] > summary::before { content: '▾'; }
+details.sec > summary:hover, details.about > summary:hover { color: var(--accent); }
+details.sec[open] > summary { margin-bottom: 8px; }
+details.sec[hidden] { display: none; }
+/* 畳んでいても接続の状態だけは見えるように、見出しの右に写す */
+.sum-note { margin-left: auto; font-weight: 400; letter-spacing: 0; color: var(--ink-2);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+details[open] > summary .sum-note { display: none; }
+details.about { margin-top: 6px; }
+details.about[open] > summary { margin-bottom: 4px; }
+#clock { margin-top: 8px; }
+/* プルダウンの記号の意味 */
+.sum-note.ok { color: var(--ok); }
+.sum-note.warn { color: var(--warn); }
+.sum-note.low { color: var(--accent); }
+.legend { margin-top: 5px; font: 11.5px/1.6 var(--sans); color: var(--muted);
+          display: flex; flex-wrap: wrap; column-gap: 12px; }
+.legend span { white-space: nowrap; }
 
 /* ----------------------------------------------------------------- map */
 #map { height: 100vh; background: #0a0c0d; }
@@ -121,7 +150,7 @@ label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(
 .chip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
         margin: 0; padding: 6px 4px; border: 1px solid var(--rule); border-radius: 2px;
         background: var(--panel-2); cursor: pointer;
-        font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: none;
+        font: 600 12px/1 var(--mono); letter-spacing: .04em; text-transform: none;
         color: var(--muted); }
 .chip input { width: auto; margin: 0; accent-color: currentColor; }
 .chips.wrap .chip:has(:checked) { color: var(--lc); border-color: color-mix(in srgb, var(--lc) 45%, transparent); }
@@ -245,13 +274,13 @@ body.side-collapsed #btn-side-show { display: block; }
 #pins { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
 .pin-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center;
            padding: 5px 6px; border-radius: 2px; background: var(--panel-2);
-           font: 11px/1.5 var(--mono); }
+           font: 12px/1.5 var(--mono); }
 .pin-row.active { outline: 1px solid #ff7a5c; }
 .pin-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .pin-row .dist { color: var(--accent); font-variant-numeric: tabular-nums; }
 .pin-row .ops { display: flex; gap: 4px; }
-.pin-row button { width: auto; padding: 2px 6px; font-size: 10px; }
-.hint-line { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+.pin-row button { width: auto; padding: 2px 6px; font-size: 11px; }
+.hint-line { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 6px; }
 
 /* タスク */
 .task-icon > span { position: absolute; }
@@ -281,7 +310,7 @@ body.side-collapsed #btn-side-show { display: block; }
 .btn-link {
   display: block; width: 100%; text-align: center; text-decoration: none;
   background: var(--panel-2); border: 1px solid var(--rule); border-radius: 2px;
-  padding: 6px 8px; color: var(--ink); font: 12px/1.5 var(--sans);
+  padding: 6px 8px; color: var(--ink); font: 13px/1.5 var(--sans);
 }
 .btn-link:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -300,8 +329,8 @@ body.side-collapsed #btn-side-show { display: block; }
 #key-list .k:last-child { border-bottom: 0; }
 #key-list .k:hover { background: var(--panel); color: var(--accent); }
 #key-list .k[aria-pressed="true"] { background: var(--panel); color: var(--accent); }
-#key-list .k .cnt { font: 10px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
-#key-list .none { padding: 7px; color: var(--muted); font-size: 11px; }
+#key-list .k .cnt { font: 11px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
+#key-list .none { padding: 7px; color: var(--muted); font-size: 12px; }
 
 /* 強調した施錠扉。鍵の名前を常に出す */
 .lock-focus > span { position: absolute; }
@@ -328,25 +357,25 @@ body.side-collapsed #btn-side-show { display: block; }
 }
 #task-hits .hit:last-child { border-bottom: 0; }
 #task-hits .hit:hover, #task-hits .hit:focus-visible { background: var(--panel); color: var(--accent); }
-#task-hits .hit .pl { font: 11px/1 var(--mono); color: var(--accent); }
-#task-hits .hit .tr { font: 10px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
-#task-hits .none { padding: 7px; color: var(--muted); font-size: 11px; }
-#task-hits .more { padding: 5px 7px; color: var(--muted); font-size: 11px;
+#task-hits .hit .pl { font: 12px/1 var(--mono); color: var(--accent); }
+#task-hits .hit .tr { font: 11px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
+#task-hits .none { padding: 7px; color: var(--muted); font-size: 12px; }
+#task-hits .more { padding: 5px 7px; color: var(--muted); font-size: 12px;
                    border-top: 1px solid var(--rule); }
 
 /* 持ち物 */
 #task-loadout { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
 #task-loadout:empty { display: none; }
-.lo-head { font: 600 10px/1.6 var(--mono); letter-spacing: .1em; color: var(--muted);
+.lo-head { font: 600 11px/1.6 var(--mono); letter-spacing: .1em; color: var(--muted);
            margin-bottom: 2px; }
 .lo-row { display: grid; grid-template-columns: 46px 1fr auto; gap: 6px; align-items: baseline;
           padding: 5px 6px; background: var(--panel-2); border-radius: 2px;
-          border-left: 2px solid var(--k); font: 11px/1.5 var(--mono); text-align: left;
+          border-left: 2px solid var(--k); font: 12px/1.5 var(--mono); text-align: left;
           width: 100%; border-top: 0; border-right: 0; border-bottom: 0; }
-.lo-row .t { color: var(--k); font-weight: 600; font-size: 10px; }
-.lo-row .n { color: var(--ink); font-family: var(--sans); font-size: 11.5px;
+.lo-row .t { color: var(--k); font-weight: 600; font-size: 11px; }
+.lo-row .n { color: var(--ink); font-family: var(--sans); font-size: 13px;
              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lo-row .x { color: var(--muted); white-space: nowrap; font-size: 10px; }
+.lo-row .x { color: var(--muted); white-space: nowrap; font-size: 11px; }
 .lo-row.key { --k: #9aa7b8; cursor: pointer; }
 .lo-row.key:hover { outline: 1px solid #9aa7b8; }
 .lo-row.marker { --k: #b48cff; }
@@ -371,9 +400,9 @@ body.side-collapsed #btn-side-show { display: block; }
            padding: 5px 6px; background: var(--panel-2); border-radius: 2px; cursor: pointer;
            text-align: left; border: 0; width: 100%; }
 .obj-row:hover { outline: 1px solid #b48cff; }
-.obj-row .n { color: #b48cff; font: 700 10px/1.5 var(--mono); }
-.obj-row .d { font: 11px/1.5 var(--sans); color: var(--ink); }
-.obj-row .m { font: 10px/1.5 var(--mono); color: var(--muted); white-space: nowrap; }
+.obj-row .n { color: #b48cff; font: 700 11px/1.5 var(--mono); }
+.obj-row .d { font: 13px/1.5 var(--sans); color: var(--ink); }
+.obj-row .m { font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: nowrap; }
 .obj-row.away .d { color: var(--muted); }
 /* ストーリーの目標。座標が無いので押せない。字下げは Wiki の箇条書きの深さ */
 .obj-row.story { cursor: default; padding-left: calc(6px + var(--ind, 0) * 14px); }
@@ -381,12 +410,12 @@ body.side-collapsed #btn-side-show { display: block; }
 .obj-row.story.here { border-left: 2px solid #b48cff; }
 .obj-row.story.here .m { color: #b48cff; }
 .obj-row.story.start .n { color: var(--muted); }
-.obj-branch { margin-top: 6px; padding: 3px 6px; font: 600 10.5px/1.5 var(--sans);
+.obj-branch { margin-top: 6px; padding: 3px 6px; font: 600 12px/1.5 var(--sans);
               color: var(--accent); border-bottom: 1px solid var(--rule); }
 .story-filter { margin: 0 0 4px; }
 .plain-link { color: inherit; text-decoration: underline; }
 .obj-row .cnt { display: inline-block; margin-left: 6px; font-style: normal;
-                font: 10px/1.4 var(--mono); color: #b48cff; }
+                font: 11px/1.4 var(--mono); color: #b48cff; }
 .wiki-link { flex: none; display: inline-flex; align-items: center; padding: 6px 10px;
              font: 12px/1.5 var(--mono); color: var(--muted); text-decoration: none;
              border: 1px solid var(--rule); border-radius: 2px; }
@@ -411,7 +440,7 @@ body.side-collapsed #btn-side-show { display: block; }
 .pin-row .nm { cursor: text; }
 .pin-row .nm:hover { color: var(--accent); }
 .pin-row input.rename {
-  width: 100%; padding: 1px 4px; font: 11px/1.5 var(--mono);
+  width: 100%; padding: 1px 4px; font: 12px/1.5 var(--mono);
   background: var(--panel); border: 1px solid var(--accent); border-radius: 2px; color: var(--ink);
 }
 
@@ -561,6 +590,8 @@ body.side-collapsed #btn-side-show { display: block; }
             aria-expanded="true">‹</button>
   </div>
 
+  <!-- レイド中に見るものを上に置く: マップ → 現在地の状態 → タスク。
+       それ以外（表示の切替・鍵・アイテム・設定）は下にまとめて折りたためるようにする -->
   <div>
     <div class="field">
       <label for="map-select">マップ（手動選択）</label>
@@ -574,45 +605,19 @@ body.side-collapsed #btn-side-show { display: block; }
         <span>フロアを固定する（自動で切り替えない）</span>
       </label>
     </div>
-    <div class="field">
-      <label>脱出口の表示</label>
-      <div id="faction-filter" class="chips">
-        <label class="chip" data-f="pmc"><input type="checkbox" value="pmc" checked><span>PMC</span></label>
-        <label class="chip" data-f="scav"><input type="checkbox" value="scav" checked><span>スカブ</span></label>
-        <label class="chip" data-f="shared"><input type="checkbox" value="shared" checked><span>共通</span></label>
-      </div>
-    </div>
-    <div class="field">
-      <label>地図に出すもの</label>
-      <div id="layer-filter" class="chips wrap"></div>
-      <div id="layer-hint" class="hint-line"></div>
-    </div>
-    <div class="field">
-      <label for="item-filter">アイテムの用途</label>
-      <input type="search" id="item-filter"
-             placeholder="アイテム名を入れて Enter（電線 / wires …）" autocomplete="off">
-      <div class="btn-row" style="margin-top:5px">
-        <a class="btn-link" id="btn-items" href="./items.html" target="_blank"
-           rel="noopener">アイテム一覧を別タブで開く</a>
-      </div>
-      <div class="hint-line">画像つきの一覧は別ページです。ここで打って Enter を押すと、
-        その言葉で検索した状態で開きます。</div>
-    </div>
-    <div class="field" id="keys-field" hidden>
-      <label for="key-filter">鍵と施錠扉</label>
-      <input type="search" id="key-filter" placeholder="鍵の名前で絞り込む" autocomplete="off">
-      <div id="key-list"></div>
-    </div>
-    <div id="map-info" style="margin-top:8px"></div>
     <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
   </div>
 
   <div>
     <div id="status" class="status idle">待機中</div>
     <div id="sample-age" class="age"></div>
+    <div id="clock">
+      <label style="margin:0">ワールド時計</label>
+      <span id="world-clock">--:-- / --:--</span>
+    </div>
   </div>
 
-  <div id="sample"><div class="hint">ファイル名を貼り付けるか、座標を入力してください。</div></div>
+  <div id="sample"><div class="hint">ゲーム内でスクリーンショットを撮ると、ここに現在地が出ます。</div></div>
 
   <div>
     <label for="task-select">タスクの目標地点</label>
@@ -624,6 +629,7 @@ body.side-collapsed #btn-side-show { display: block; }
       <input type="checkbox" id="task-hide-done"><span>終わったタスクを隠す</span>
     </label>
     <select id="task-select" style="margin-top:8px"></select>
+    <div class="legend"><span>◎ このマップに地点あり</span><span>✓ 終わった</span><span>★ Kappa 必須</span><span>〈任意〉マップを問わない</span></div>
     <div class="btn-row">
       <button type="button" id="btn-task-done" hidden>終わった</button>
       <button type="button" id="btn-task-clear">解除</button>
@@ -633,8 +639,26 @@ body.side-collapsed #btn-side-show { display: block; }
     <div id="task-objectives"></div>
   </div>
 
-  <div>
-    <label>ピン（タスクの目的地など）</label>
+  <details class="sec" data-sec="layers" open>
+    <summary>地図に出すもの</summary>
+    <div class="field">
+      <label>脱出口の表示</label>
+      <div id="faction-filter" class="chips">
+        <label class="chip" data-f="pmc"><input type="checkbox" value="pmc" checked><span>PMC</span></label>
+        <label class="chip" data-f="scav"><input type="checkbox" value="scav" checked><span>スカブ</span></label>
+        <label class="chip" data-f="shared"><input type="checkbox" value="shared" checked><span>共通</span></label>
+      </div>
+    </div>
+    <div class="field">
+      <label>地点</label>
+      <div id="layer-filter" class="chips wrap"></div>
+      <div id="layer-hint" class="hint-line"></div>
+    </div>
+    <div id="map-info" style="margin-top:8px"></div>
+  </details>
+
+  <details class="sec" data-sec="pins" open>
+    <summary>ピンと距離</summary>
     <div class="pin-tools">
       <button type="button" id="btn-place" class="pin-toggle" aria-pressed="false"
               title="オンにすると、地図をクリックするたびにピンが刺さります">
@@ -652,15 +676,30 @@ body.side-collapsed #btn-side-show { display: block; }
       </button>
       <output id="measure-out" class="hint-line"></output>
     </div>
-    <div class="pin-tools">
-      <button type="button" id="btn-export">レイドの記録を書き出す</button>
-    </div>
-    <div id="export-hint" class="hint-line">受け取ったファイル名と判定を JSON で保存します。不具合の報告に添えてください。</div>
     <div id="pins"></div>
-  </div>
+  </details>
 
-  <div>
-    <label>スクリーンショットフォルダ</label>
+  <details class="sec" data-sec="keys" id="keys-field" hidden>
+    <summary>鍵と施錠扉</summary>
+    <input type="search" id="key-filter" placeholder="鍵の名前で絞り込む" autocomplete="off"
+           aria-label="鍵の名前で絞り込む">
+    <div id="key-list"></div>
+  </details>
+
+  <details class="sec" data-sec="items">
+    <summary>アイテムの用途</summary>
+    <input type="search" id="item-filter" aria-label="アイテムの用途を調べる"
+           placeholder="アイテム名を入れて Enter（電線 / wires …）" autocomplete="off">
+    <div class="btn-row" style="margin-top:5px">
+      <a class="btn-link" id="btn-items" href="./items.html" target="_blank"
+         rel="noopener">アイテム一覧を別タブで開く</a>
+    </div>
+    <div class="hint-line">画像つきの一覧は別ページです。ここで打って Enter を押すと、
+      その言葉で検索した状態で開きます。</div>
+  </details>
+
+  <details class="sec" data-sec="watch" open>
+    <summary>スクリーンショットフォルダ<span class="sum-note" data-mirror="watch-status"></span></summary>
     <div id="watch-status" class="status idle">フォルダ未接続</div>
     <div class="btn-row">
       <button type="button" id="btn-pick">フォルダを選ぶ</button>
@@ -680,9 +719,10 @@ body.side-collapsed #btn-side-show { display: block; }
       既定は <code>ドキュメント\Escape from Tarkov\Screenshots</code>。OneDrive に
       リダイレクトされている場合はそちらを選んでください。
     </p>
-  </div>
+  </details>
 
-  <div>
+  <details class="sec" data-sec="input">
+    <summary>ファイル名・座標の手入力と記録</summary>
     <form id="input-form">
       <div class="field">
         <label for="input-text">ファイル名を貼り付ける / 座標を直接入力</label>
@@ -701,28 +741,30 @@ body.side-collapsed #btn-side-show { display: block; }
         <button type="button" id="btn-switch" hidden></button>
       </div>
     </form>
-  </div>
-
-  <div id="clock">
-    <label style="margin:0">ワールド時計</label>
-    <span id="world-clock">--:-- / --:--</span>
-  </div>
+    <div class="pin-tools" style="margin-top:10px">
+      <button type="button" id="btn-export">レイドの記録を書き出す</button>
+    </div>
+    <div id="export-hint" class="hint-line">受け取ったファイル名と判定を JSON で保存します。不具合の報告に添えてください。</div>
+  </details>
 
   <div class="grow">
-    <p class="safety">
-      このアプリは<b>スクリーンショットのファイル名だけ</b>を読みます。画像の中身は開かず、
-      ゲームフォルダにもアクセスせず、座標を外部に送信しません。すべてブラウザ内で完結します。
-    </p>
-    <p class="safety" id="attrib"></p>
-    <p class="safety" id="build-stamp"></p>
-    <p class="safety">
-      メインストーリーの目標文: <a class="plain-link" href="https://escapefromtarkov.fandom.com/wiki/Story_chapters"
-      target="_blank" rel="noopener noreferrer">Escape from Tarkov Wiki</a>（Fandom, CC BY-SA 3.0）
-    </p>
     <p class="safety">
       非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
       地図素材のライセンス上、<b>ゲーム画面に重ねての使用は禁止</b>されています。
     </p>
+    <details class="about" data-sec="about">
+      <summary>このアプリについて・出典</summary>
+      <p class="safety">
+        このアプリは<b>スクリーンショットのファイル名だけ</b>を読みます。画像の中身は開かず、
+        ゲームフォルダにもアクセスせず、座標を外部に送信しません。すべてブラウザ内で完結します。
+      </p>
+      <p class="safety" id="attrib"></p>
+      <p class="safety" id="build-stamp"></p>
+      <p class="safety">
+        メインストーリーの目標文: <a class="plain-link" href="https://escapefromtarkov.fandom.com/wiki/Story_chapters"
+        target="_blank" rel="noopener noreferrer">Escape from Tarkov Wiki</a>（Fandom, CC BY-SA 3.0）
+      </p>
+    </details>
   </div>
 </div>
 
