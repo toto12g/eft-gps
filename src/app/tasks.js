@@ -191,51 +191,6 @@ export function mapName(key) {
 }
 
 /**
- * 一覧で使うトレーダーの並び。ゲーム内のトレーダー画面の順にする。
- * ストーリーは先頭。ここに無いトレーダーは最後に名前順で付く。
- */
-export const TRADER_ORDER = [
-  'Story', 'Prapor', 'Therapist', 'Fence', 'Skier', 'Peacekeeper', 'Mechanic',
-  'Ragman', 'Jaeger', 'Ref', 'Lightkeeper', 'Btr Driver',
-];
-
-/** グループの見出し。ストーリーだけは「トレーダー名」ではないので言い換える。 */
-export function traderLabel(tr) {
-  if (tr === 'Story') return 'メインストーリー';
-  const ja = TRADER_ALIASES[tr];
-  return ja ? `${tr}（${ja.split(' ')[0]}）` : tr;
-}
-
-/**
- * トレーダーごとにまとめる。中は必要レベル → 名前の順。
- * マップ固有のものと「任意のマップ」のものは別ファイルから来るので、
- * ここで混ぜて並べ直す（そのままだと同じトレーダーが 2 箇所に出る）。
- * ストーリーは章の並び（このマップに関わる章が先）を崩さない。
- * @returns {{trader:string, label:string, tasks:Object[]}[]}
- */
-export function groupTasks(tasks) {
-  const groups = new Map();
-  for (const t of tasks) {
-    const key = t.tr || '?';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(t);
-  }
-  const rank = (tr) => {
-    const i = TRADER_ORDER.indexOf(tr);
-    return i < 0 ? TRADER_ORDER.length : i;
-  };
-  return [...groups.entries()]
-    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
-    .map(([trader, list]) => ({
-      trader,
-      label: traderLabel(trader),
-      tasks: trader === 'Story'
-        ? list
-        : [...list].sort((a, b) => (a.lv || 0) - (b.lv || 0) || String(a.n).localeCompare(String(b.n))),
-    }));
-}
-
-/**
  * 検索用に文字を揃える。
  *
  * 打ち間違いではなく「書き方が違うだけ」で外れるのを防ぐ:

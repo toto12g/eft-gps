@@ -17,9 +17,9 @@ import { ScreenshotWatcher, WATCH, isSupported } from '../watch/index.js';
 import { MapView } from './map.js';
 import { loadPins, savePins, addPin, removePin, renamePin, pinBearing } from './pins.js';
 import {
-  loadTasks, filterTasks, objectiveGeometry, objectiveApplies,
+  loadTasks, filterTasks, taskLabel, objectiveGeometry, objectiveApplies,
   taskKeyDoors, taskLoadout, taskPoints, normalizeQuery, OBJECTIVE_TYPE,
-  groupTasks, mapName,
+  mapName,
 } from './tasks.js';
 import {
   loadLandmarks, LAYERS, DEFAULT_ENABLED, layerCount, hazardLabel, bossLabel,
@@ -98,8 +98,6 @@ const state = {
   /** 終わったタスクの id。ゲーム側からは読めないので手で印を付けてもらう */
   doneTasks: new Set(safeParse('eft-gps.doneTasks', [])),
   hideDone: localStorage.getItem('eft-gps.hideDone') === '1',
-  /** 受注中にしたタスクの id。並びは付けた順で、地図の色はこの順に割り当てる */
-  tracked: new Set(safeParse('eft-gps.trackedTasks', [])),
   /** ストーリーの章で、このマップの目標だけを出すか */
   storyHereOnly: localStorage.getItem('eft-gps.storyHereOnly') === '1',
   activeTask: null,
@@ -475,23 +473,6 @@ function setupTasks() {
   $('task-select').addEventListener('change', (ev) => selectTask(ev.target.value));
   $('btn-task-clear').addEventListener('click', () => selectTask(''));
 
-  // 受注中。1 レイドで複数のタスクを進めるので、選択中の 1 件とは別に
-  // まとめて地図へ出す
-  $('btn-task-track').addEventListener('click', () => {
-    const t = state.activeTask;
-    if (!t) return;
-    setTracked(t.id, !state.tracked.has(t.id));
-  });
-  $('task-tracked').addEventListener('click', (ev) => {
-    const rm = ev.target.closest('[data-untrack]');
-    if (rm) {
-      setTracked(rm.dataset.untrack, false);
-      return;
-    }
-    const row = ev.target.closest('.trk-row');
-    if (row) selectTask(row.dataset.id);
-  });
-
   // 進行状況。ゲームからは読めないので手で印を付けてもらう。
   // 一覧は 243 件あり、終わったものが混ざったままだと探すのが辛い。
   const hide = $('task-hide-done');
@@ -511,8 +492,6 @@ function setupTasks() {
     try {
       localStorage.setItem('eft-gps.doneTasks', JSON.stringify([...state.doneTasks]));
     } catch { /* 保存できなくても動作には影響しない */ }
-    // 終わったものを受注中に残しておく理由は無い
-    if (state.doneTasks.has(t.id) && state.tracked.has(t.id)) setTracked(t.id, false);
     // 隠す設定なら、印を付けた時点で一覧から消えるので選択も外す
     if (state.hideDone && state.doneTasks.has(t.id)) selectTask('');
     else { renderTaskOptions(); syncTaskDoneButton(); }
@@ -530,98 +509,9 @@ function syncTaskDoneButton() {
   btn.setAttribute('aria-pressed', String(done));
 }
 
-/** 受注中に足す／外す。 */
-function setTracked(id, on) {
-  if (on) state.tracked.add(id);
-  else state.tracked.delete(id);
-  try {
-    localStorage.setItem('eft-gps.trackedTasks', JSON.stringify([...state.tracked]));
-  } catch { /* 保存できなくても動作には影響しない */ }
-  syncTaskTrackButton();
-  renderTaskOptions();
-  renderTracked();
-}
-
-function syncTaskTrackButton() {
-  const btn = $('btn-task-track');
-  const t = state.activeTask;
-  btn.hidden = !t;
-  if (!t) return;
-  const on = state.tracked.has(t.id);
-  // ボタンが 4 つ並ぶので、折り返さない長さにしておく
-  btn.textContent = on ? '受注解除' : '受注する';
-  btn.setAttribute('aria-pressed', String(on));
-}
-
-// 受注中のタスクの色。選択中の紫（#b48cff）とも、脱出口の緑・橙・黄や
-// ピンの琥珀とも被らないものだけにしてある
-const TRACK_COLORS = ['#5cc8ff', '#ff6fae', '#eef2f5', '#7f9cff', '#3fd6c6'];
-const ACTIVE_COLOR = '#b48cff';
-
-function trackColor(id) {
-  const i = [...state.tracked].indexOf(id);
-  return TRACK_COLORS[Math.max(0, i) % TRACK_COLORS.length];
-}
-
 /** ストーリーの章のうち、このマップに関わる目標の数。 */
 function storyHereCount(task) {
   return (task.o || []).filter((o) => (o.sm || []).includes(state.selectedKey)).length;
-}
-
-/**
- * 受注中の一覧と、地図上の印を作り直す。
- * 選択中のタスクは setTask が説明つきで描くので、ここでは描かない（二重になる）。
- */
-function renderTracked() {
-  const box = $('task-tracked');
-  box.innerHTML = '';
-  const byId = new Map(state.tasks.map((t) => [t.id, t]));
-  const here = [...state.tracked].map((id) => byId.get(id)).filter(Boolean);
-  const elsewhere = state.tracked.size - here.length;
-
-  state.view.setTracked(
-    here.filter((t) => t !== state.activeTask).map((t) => ({ task: t, color: trackColor(t.id) })),
-    state.selectedKey,
-    (id, i) => {
-      selectTask(id);
-      focusObjective(i);
-    },
-  );
-  if (!state.tracked.size) return;
-
-  const head = document.createElement('div');
-  head.className = 'lo-head';
-  head.textContent = `受注中 ${here.length} 件`
-    + (elsewhere ? `（ほかのマップだけのもの ${elsewhere} 件）` : '');
-  box.appendChild(head);
-
-  // 地図に出るものを上に。色は付けた順のままにして、並べ替えても変わらないようにする
-  const rows = here.map((t) => {
-    const pts = taskPoints(t, state.selectedKey).length;
-    const n = t.story ? storyHereCount(t) : 0;
-    const meta = t.story
-      ? (n ? `このマップ ${n} 件` : '別マップ')
-      : pts ? `◎ ${pts} 箇所` : '地点なし';
-    return { t, pts, meta };
-  }).sort((a, b) => (b.pts > 0) - (a.pts > 0));
-
-  for (const { t, meta } of rows) {
-    const row = document.createElement('div');
-    row.className = 'trk-row' + (t === state.activeTask ? ' active' : '');
-    row.dataset.id = t.id;
-    row.setAttribute('role', 'button');
-    row.tabIndex = 0;
-    const color = t === state.activeTask ? ACTIVE_COLOR : trackColor(t.id);
-    row.innerHTML =
-      `<span class="sw" style="--c:${color}"></span>` +
-      `<span class="n" title="${escapeHtml(t.n || '')}">${escapeHtml(t.n || '')}</span>` +
-      `<span class="m">${escapeHtml(meta)}</span>` +
-      `<button type="button" class="x" data-untrack="${escapeHtml(t.id)}" title="受注中から外す">×</button>`;
-    row.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && ev.target === row) selectTask(t.id);
-    });
-    box.appendChild(row);
-  }
 }
 
 /** そのマップのタスクを読み込んで一覧を作る。 */
@@ -645,10 +535,8 @@ async function loadMapTasks(mapData) {
   const wantId = (prev && prev.id) || state.wantTaskId;
   if (wantId && state.tasks.some((t) => t.id === wantId)) {
     selectTask(wantId);
-  } else {
-    renderTracked();
-    syncTaskTrackButton();
-    if (prev) setStatus(`「${prev.n}」は ${mapData.key} の目標ではないので選択を外しました`, 'low');
+  } else if (prev) {
+    setStatus(`「${prev.n}」は ${mapData.key} の目標ではないので選択を外しました`, 'low');
   }
 }
 
@@ -679,35 +567,22 @@ function renderTaskOptions() {
         ? '— データが古いようです。Ctrl+Shift+R で再読み込みしてください —'
         : '— このマップに目標地点のあるタスクはありません —';
   sel.appendChild(none);
-  // トレーダーごとに見出しを付ける。200 件以上が 1 本に並んでいると、
-  // 目当てのトレーダーの範囲を探すだけで手間がかかる
-  for (const g of groupTasks(shown)) {
-    const group = document.createElement('optgroup');
-    group.label = `${g.label}（${g.tasks.length}）`;
-    for (const t of g.tasks) {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      // 一覧 243 件のうち地点を持つのは Customs で 41 件しかない。
-      // 選んでから「何も出ない」と気づくより、選ぶ前に分かるほうがよい
-      const hasPlace = taskPoints(t, state.selectedKey).length > 0;
-      const mark = state.doneTasks.has(t.id) ? '✓ ' : state.tracked.has(t.id) ? '● ' : '';
-      opt.textContent = mark + (hasPlace ? '◎ ' : '　') + optionLabel(t);
-      group.appendChild(opt);
-    }
-    sel.appendChild(group);
+  for (const t of shown) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    // 一覧 243 件のうち地点を持つのは Customs で 41 件しかない。
+    // 選んでから「何も出ない」と気づくより、選ぶ前に分かるほうがよい
+    const hasPlace = taskPoints(t, state.selectedKey).length > 0;
+    // ストーリーは地点を持たないので、代わりにこのマップの目標数を添える
+    const here = t.story ? storyHereCount(t) : 0;
+    opt.textContent =
+      (state.doneTasks.has(t.id) ? '✓ ' : '') + (hasPlace ? '◎ ' : '　') + taskLabel(t)
+      + (here ? `（このマップの目標 ${here} 件）` : '');
+    sel.appendChild(opt);
   }
   sel.disabled = !state.tasks.length;
   sel.value = state.activeTask ? state.activeTask.id : '';
   renderTaskHits(shown);
-}
-
-/** 一覧の 1 行。トレーダー名は見出しに出るので繰り返さない。 */
-function optionLabel(t) {
-  if (t.story) {
-    const n = storyHereCount(t);
-    return `${t.n}${n ? `（このマップの目標 ${n} 件）` : ''}`;
-  }
-  return `${t.any ? '〈任意〉' : ''}${t.n}${t.lv ? `  Lv${t.lv}` : ''}${t.kap ? ' ★' : ''}`;
 }
 
 /**
@@ -766,13 +641,11 @@ function selectTask(id) {
   if (state.hideDone) renderTaskOptions();
   $('task-select').value = id || '';
   syncTaskDoneButton();
-  syncTaskTrackButton();
   const wiki = $('task-wiki');
   wiki.hidden = !(state.activeTask && state.activeTask.w);
   if (!wiki.hidden) wiki.href = state.activeTask.w;
   const doors = state.activeTask ? taskKeyDoors(state.activeTask, state.landmarks) : [];
   state.view.setTask(state.activeTask, state.selectedKey, focusObjective, doors);
-  renderTracked();
   renderLoadout(doors);
   renderObjectives();
 

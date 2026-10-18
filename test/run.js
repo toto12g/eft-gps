@@ -36,7 +36,7 @@ import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '..
 import {
   loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints,
   taskKeyDoors, taskLoadout, objectiveApplies, OBJECTIVE_TYPE,
-  clearTaskCache, groupTasks, TRADER_ORDER,
+  clearTaskCache,
 } from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
 import {
@@ -2722,7 +2722,7 @@ await check('参照パスがすべて相対（サブパス配信に耐える）'
 
 /* --------------------------------------------------------------------- T29 */
 
-group('T29 メインストーリーとトレーダー別の一覧');
+group('T29 メインストーリー');
 
 clearTaskCache();
 const storyCustoms = await loadTasks(
@@ -2771,23 +2771,6 @@ await check('ストーリーを日本語でもマップ名でも引ける', () =
   const byMap = filterTasks(chapters, 'ショアライン');
   truthy(byMap.length > 0 && byMap.every((c) => c.mp.includes('shoreline')), 'マップ名で絞れない');
   return `ショアライン → ${byMap.map((c) => c.n).join(', ')}`;
-});
-
-await check('トレーダー別にまとめると重複も欠けも無い', () => {
-  const groups = groupTasks(storyCustoms);
-  eq(groups[0].trader, 'Story', '先頭がストーリーでない');
-  eq(groups.reduce((n, g) => n + g.tasks.length, 0), storyCustoms.length, '件数が合わない');
-  const names = groups.map((g) => g.trader);
-  eq(new Set(names).size, names.length, '同じトレーダーが 2 回出た');
-  truthy(names.indexOf('Prapor') < names.indexOf('Therapist'), 'ゲーム内の順になっていない');
-  for (const g of groups.slice(1)) {
-    for (let i = 1; i < g.tasks.length; i++) {
-      truthy((g.tasks[i - 1].lv || 0) <= (g.tasks[i].lv || 0), `${g.trader} がレベル順でない`);
-    }
-  }
-  const unknown = names.filter((n) => !TRADER_ORDER.includes(n));
-  eq(unknown.length, 0, `並び順に無いトレーダー: ${unknown.join(', ')}`);
-  return names.join(' / ');
 });
 
 await check('ストーリーのデータもオフライン用に先読みされる', async () => {
