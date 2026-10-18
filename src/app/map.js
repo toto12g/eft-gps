@@ -61,6 +61,8 @@ export class MapView {
     this.pinLayer = null;
     this.routeLayer = null;
     this.taskLayer = null;
+    /** 受注中にしたタスク（選択中のもの以外）の目標 */
+    this.trackedLayer = null;
     this.landmarkLayer = null;
     this.northCtl = null;
     this.hintLayer = null;
@@ -166,7 +168,7 @@ export class MapView {
     // 計測の途中で地図が変わったら、1 点目は捨てる（別の地図の座標なので）
     this.measureFrom = null;
     this.onMeasure(null);
-    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'landmarkLayer', 'hintLayer', 'measureLayer', 'keyLayer']) {
+    for (const key of ['baseLayer', 'extractLayer', 'playerLayer', 'trailLayer', 'pinLayer', 'routeLayer', 'taskLayer', 'trackedLayer', 'landmarkLayer', 'hintLayer', 'measureLayer', 'keyLayer']) {
       if (this[key]) {
         this[key].remove();
         this[key] = null;
@@ -330,6 +332,60 @@ export class MapView {
         // ピンをクリックしたときに地図のクリック（ピン設置）を起こさない
         if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
         this.onPinClick(pin.id);
+      });
+    }
+  }
+
+  /**
+   * 受注中のタスクの目標地点をまとめて描く。
+   *
+   * 選択中のタスク（setTask）は説明文つきで大きく出す。こちらは「ほかに
+   * 何をどこでやるか」が分かればよいので、タスクごとに色を分けて番号だけにし、
+   * タスク名はそのタスクの最初の印にだけ添える。全部に文字を出すと、
+   * 3〜4 件受けただけで地図が文字で埋まる。
+   * @param {{task:Object, color:string}[]} entries
+   * @param {string} mapKey
+   * @param {(taskId:string, index:number) => void} [onPick]
+   */
+  setTracked(entries, mapKey, onPick = () => {}) {
+    const L = this.L;
+    if (this.trackedLayer) this.trackedLayer.remove();
+    this.trackedLayer = null;
+    if (!entries.length || !this.mapData || !this.mapData.affine) return;
+
+    const aff = this.mapData.affine;
+    this.trackedLayer = L.layerGroup().addTo(this.map);
+    for (const { task, color } of entries) {
+      let first = true;
+      (task.o || []).forEach((objective, i) => {
+        const pts = [
+          ...(objective.z || []).filter((z) => z.m === mapKey).map((z) => ({ p: z.p, o: z.o, spot: false })),
+          ...(objective.l || []).filter((l) => l.m === mapKey).flatMap((l) => l.p.map((p) => ({ p, spot: true }))),
+        ];
+        for (const { p, o, spot } of pts) {
+          if ((o || []).length >= 3) {
+            L.polygon(o.map((v) => worldToLatLng(aff, v[0], v[1])), {
+              color, weight: 1.5, fillOpacity: 0.16, interactive: false,
+            }).addTo(this.trackedLayer);
+          }
+          const marker = L.marker(worldToLatLng(aff, p[0], p[2]), {
+            icon: L.divIcon({
+              className: 'task-icon task-tracked' + (spot ? ' task-spot' : ''),
+              html:
+                `<span class="num" style="--c:${color}">${i + 1}</span>` +
+                (first ? `<span class="label" style="--c:${color}">${escapeHtml(task.n || '')}</span>` : ''),
+              iconSize: [0, 0],
+            }),
+            // 選択中のタスク（700）より下、脱出口などよりは上
+            zIndexOffset: 600,
+          }).addTo(this.trackedLayer);
+          first = false;
+          marker.bindTooltip(`${escapeHtml(task.n || '')}<br>${i + 1}. ${escapeHtml(objective.d || '')}`);
+          marker.on('click', (ev) => {
+            if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+            onPick(task.id, i);
+          });
+        }
       });
     }
   }

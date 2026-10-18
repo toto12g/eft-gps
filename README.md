@@ -502,11 +502,12 @@ Service Worker は**ネットワーク優先・キャッシュ退避**にして�
 | POI | 19,320 点 | data/poi.bin 115,920 B |
 | 脱出口 | 132 箇所 |  |
 | タスク | 延べ 758 件（うちマップ非依存 167） | data/tasks/ 574,959 B |
+| ストーリー | 10 章（Wiki から。地点データなし） | data/story.json 39,962 B |
 | 名前の付いた地点 | 3984 件 | data/landmarks/ 311,163 B |
 | アイテムの用途 | 634 種 | data/items.json 269,244 B |
-| メタデータ |  | data/mapdb.json 67,948 B |
+| メタデータ |  | data/mapdb.json 67,994 B |
 
-生成 2026-10-04 22:51 / スキーマ v2
+生成 2026-10-19 03:12 / スキーマ v2
 <!-- data:end -->
 
 ## 状態
@@ -533,6 +534,8 @@ Service Worker は**ネットワーク優先・キャッシュ退避**にして�
 禁止されている。
 
 マップメタデータは [the-hideout/tarkov-dev](https://github.com/the-hideout/tarkov-dev)（MIT）
-と [tarkov.dev API](https://tarkov.dev/) より。ゲーム内時計の式は
+と [tarkov.dev API](https://tarkov.dev/) より。メインストーリーの章と目標文（`data/story.json`）は
+[Escape from Tarkov Wiki](https://escapefromtarkov.fandom.com/wiki/Story_chapters)（Fandom, CC BY-SA 3.0）
+から取り込んでおり、このファイルは元のライセンス（CC BY-SA 3.0）のまま扱う。ゲーム内時計の式は
 [adamburgess/tarkov-time](https://github.com/adamburgess/tarkov-time) 由来。
 `vendor/leaflet/` は [Leaflet](https://leafletjs.com/) 1.9.4（BSD-2-Clause）。

@@ -36,6 +36,7 @@ import { addPin, removePin, renamePin, pinBearing, loadPins, savePins } from '..
 import {
   loadTasks, filterTasks, taskLabel, objectiveGeometry, taskPoints,
   taskKeyDoors, taskLoadout, objectiveApplies, OBJECTIVE_TYPE,
+  clearTaskCache, groupTasks, TRADER_ORDER,
 } from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
 import {
@@ -2717,6 +2718,84 @@ await check('参照パスがすべて相対（サブパス配信に耐える）'
   for (const icon of m3.icons) if (icon.src.startsWith('/')) bad.push(`manifest → ${icon.src}`);
   eq(bad.length, 0, `絶対パス: ${bad.join(', ')}`);
   return 'ルート絶対パスの参照なし';
+});
+
+/* --------------------------------------------------------------------- T29 */
+
+group('T29 メインストーリーとトレーダー別の一覧');
+
+clearTaskCache();
+const storyCustoms = await loadTasks(
+  'customs', '../data/tasks/customs.json', '../data/tasks/_any.json', '../' + db.storyFile,
+);
+const chapters = storyCustoms.filter((t) => t.story);
+
+await check('ストーリーの章が読める', () => {
+  truthy(db.storyFile, 'mapdb に storyFile が無い');
+  truthy(chapters.length >= 10, `章が少ない: ${chapters.length}`);
+  for (const c of chapters) {
+    truthy(c.o.length > 0, `目標が無い: ${c.n}`);
+    truthy(String(c.w).startsWith('https://escapefromtarkov.fandom.com/wiki/'), `Wiki が無い: ${c.n}`);
+    eq(c.tr, 'Story', '章のトレーダー欄');
+  }
+  return `${chapters.length} 章 / 目標 ${chapters.reduce((n, c) => n + c.o.length, 0)} 行`;
+});
+
+await check('このマップに関わる章が先に並ぶ', () => {
+  const firstAway = chapters.findIndex((c) => !c.mp.includes('customs'));
+  const lastHere = chapters.map((c) => c.mp.includes('customs')).lastIndexOf(true);
+  truthy(lastHere >= 0, 'Customs に関わる章が無い');
+  truthy(firstAway < 0 || lastHere < firstAway, '関わらない章が先に出ている');
+  // トレーダーのタスクより前
+  eq(storyCustoms.findIndex((t) => !t.story), chapters.length, 'ストーリーが先頭にまとまっていない');
+  return `Customs に関わる章 ${lastHere + 1} / ${chapters.length}`;
+});
+
+await check('ストーリーの目標はマップ名で別マップを判定する', () => {
+  const tour = chapters.find((c) => c.n === 'Tour');
+  truthy(tour, 'Tour が無い');
+  const gz = tour.o.find((o) => (o.sm || []).includes('ground-zero') && o.sm.length === 1);
+  truthy(gz, 'Ground Zero だけの目標が無い');
+  truthy(objectiveApplies(gz, 'ground-zero'), '該当マップで有効にならない');
+  truthy(!objectiveApplies(gz, 'customs'), '別マップでも有効になった');
+  eq(taskPoints(tour, 'customs').length, 0, '座標の無い章から地点が出た');
+  truthy(tour.o.some((o) => o.ind), '字下げ（サブ目標）が取れていない');
+  return `「${gz.d}」は ground-zero だけ`;
+});
+
+await check('ストーリーを日本語でもマップ名でも引ける', () => {
+  // 長音を無視するので「ストーリー」は「ストリート」（Streets）にも当たる。章が全部入っていればよい
+  const hits = filterTasks(storyCustoms, 'ストーリー');
+  truthy(chapters.every((c) => hits.includes(c)), '「ストーリー」で全章が出ない');
+  eq(filterTasks(storyCustoms, 'メインストーリー').length, chapters.length, '「メインストーリー」で章だけにならない');
+  const byMap = filterTasks(chapters, 'ショアライン');
+  truthy(byMap.length > 0 && byMap.every((c) => c.mp.includes('shoreline')), 'マップ名で絞れない');
+  return `ショアライン → ${byMap.map((c) => c.n).join(', ')}`;
+});
+
+await check('トレーダー別にまとめると重複も欠けも無い', () => {
+  const groups = groupTasks(storyCustoms);
+  eq(groups[0].trader, 'Story', '先頭がストーリーでない');
+  eq(groups.reduce((n, g) => n + g.tasks.length, 0), storyCustoms.length, '件数が合わない');
+  const names = groups.map((g) => g.trader);
+  eq(new Set(names).size, names.length, '同じトレーダーが 2 回出た');
+  truthy(names.indexOf('Prapor') < names.indexOf('Therapist'), 'ゲーム内の順になっていない');
+  for (const g of groups.slice(1)) {
+    for (let i = 1; i < g.tasks.length; i++) {
+      truthy((g.tasks[i - 1].lv || 0) <= (g.tasks[i].lv || 0), `${g.trader} がレベル順でない`);
+    }
+  }
+  const unknown = names.filter((n) => !TRADER_ORDER.includes(n));
+  eq(unknown.length, 0, `並び順に無いトレーダー: ${unknown.join(', ')}`);
+  return names.join(' / ');
+});
+
+await check('ストーリーのデータもオフライン用に先読みされる', async () => {
+  const sw = await fetch('../sw.js').then((r) => r.text());
+  truthy(sw.includes('db?.storyFile'), 'sw.js が storyFile を先読みしていない');
+  const r = await fetch('../' + db.storyFile);
+  eq(r.status, 200, 'story.json を配信できない');
+  return db.storyFile;
 });
 
 /* -------------------------------------------------------------------- 出力 */

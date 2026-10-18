@@ -24,6 +24,7 @@ import os
 import re
 import struct
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -765,6 +766,136 @@ def build_tasks(refresh: bool, id_to_key: dict):
     return counts
 
 
+# Wiki 上のマップ名 → こちらのキー。リンク先がこの名前と完全に一致するときだけ
+# マップへの言及とみなす（"The Labyrinth (story chapter)" は章の名前でマップではない）
+WIKI_MAPS = {
+    "Customs": "customs", "Factory": "factory", "Ground Zero": "ground-zero",
+    "Icebreaker": "icebreaker", "Interchange": "interchange", "Lighthouse": "lighthouse",
+    "Reserve": "reserve", "Shoreline": "shoreline", "Streets of Tarkov": "streets-of-tarkov",
+    "Terminal": "terminal", "The Lab": "the-lab", "The Labyrinth": "the-labyrinth",
+    "Woods": "woods",
+}
+WIKI_LINK = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]")
+
+
+def wiki_section(text: str, name: str) -> str:
+    """==name== から次の ==…== までを返す。===…=== は区切りにしない。"""
+    m = re.search(rf"^==\s*{re.escape(name)}\s*==\s*$", text, re.M)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    nxt = re.search(r"^==[^=].*?[^=]==\s*$", rest, re.M)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def wiki_plain(s: str):
+    """wikitext の 1 行を、表示する文字列と言及しているマップに分ける。"""
+    maps = []
+
+    def link(m):
+        target, label = m.group(1).strip(), m.group(2)
+        if target in WIKI_MAPS:
+            maps.append(WIKI_MAPS[target])
+        return (label if label is not None else target).strip()
+
+    s = re.sub(r"\[\[File:[^\[\]]*\]\]", "", s)
+    s = WIKI_LINK.sub(link, s)
+    s = re.sub(r"\{\{[^{}]*\}\}", "", s)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = s.replace("'''", "").replace("''", "")
+    return re.sub(r"\s+", " ", s).strip(), list(dict.fromkeys(maps))
+
+
+def build_story(refresh: bool):
+    """メインストーリー（ストーリー章）を Wiki から取り込む。
+
+    tarkov.dev のタスクにはストーリー章が 1 件も入っていない（トレーダーの
+    タスクだけ）。座標も無いので地図にピンは出せない。ここでは章ごとの
+    目標の一覧と、各目標がどのマップに関わるかだけを持つ。文面は Wiki の英語のまま。
+    """
+    api = "https://escapefromtarkov.fandom.com/api.php?action=parse&prop=wikitext&format=json&redirects=1&page="
+
+    def wikitext(page: str, name: str) -> str:
+        body = json.loads(fetch(api + urllib.parse.quote(page.replace(" ", "_")), name, refresh))
+        return body["parse"]["wikitext"]["*"]
+
+    index = wikitext("Story chapters", "story_index.json")
+    chapters = []
+    for target, label in re.findall(r"^\|\s*\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]\s*$", index, re.M):
+        # 同じ表に章のバナー画像（[[File:…|450px]]）の列もある
+        if not target.startswith("File:"):
+            chapters.append((target.strip(), (label or target).strip()))
+
+    out = []
+    for target, title in chapters:
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+        text = wikitext(target, f"story_{slug}.json")
+        text = re.sub(r"<gallery.*?</gallery>", "", text, flags=re.S)
+
+        # 攻略の見出し（===目標文===）の下に出てくるマップを、その目標に足す。
+        # 目標文そのものにマップのリンクが無くても、攻略にはマップ別の手順がある
+        # （Batya の「BEAR 特殊部隊の痕跡」は ====Customs==== などに分かれている）。
+        guide_maps = {}
+        parts = re.split(r"^===([^=].*?)===\s*$", wiki_section(text, "Guide"), flags=re.M)
+        for head, body in zip(parts[1::2], parts[2::2]):
+            key, hm = wiki_plain(head)
+            _, bm = wiki_plain(body)
+            guide_maps.setdefault(key.lower(), []).extend(hm + bm)
+
+        rows = []
+
+        def add_lines(src: str, start: bool):
+            for line in src.splitlines():
+                line = line.strip()
+                if not line or line.startswith(":"):
+                    continue
+                m = re.match(r"^(\*+)\s*(.*)$", line)
+                h = re.match(r"^===(.*?)===$", line) or re.match(r"^'''(.*?)(?:''')?$", line)
+                if m:
+                    d, maps = wiki_plain(m.group(2))
+                    opt = bool(re.match(r"^\(Optional\)\s*", d, re.I))
+                    d = re.sub(r"^\(Optional\)\s*", "", d, flags=re.I)
+                    maps = list(dict.fromkeys(maps + guide_maps.get(d.lower(), [])))
+                    row = {"d": d, "t": "start" if start else "story"}
+                    if len(m.group(1)) > 1:
+                        row["ind"] = len(m.group(1)) - 1
+                    if opt:
+                        row["opt"] = 1
+                    if maps:
+                        row["sm"] = maps
+                elif h or start:
+                    d, maps = wiki_plain((h.group(1) if h else line))
+                    row = {"d": d, "t": "start" if start else "branch"}
+                    if maps and start:
+                        row["sm"] = maps
+                else:
+                    continue
+                if row["d"]:
+                    rows.append(row)
+
+        add_lines(wiki_section(text, "Requirements"), True)
+        add_lines(wiki_section(text, "Objectives"), False)
+        if not rows:
+            print(f"  !! ストーリー「{title}」の目標を読めませんでした", file=sys.stderr)
+            continue
+
+        maps = list(dict.fromkeys(k for r in rows for k in r.get("sm", [])))
+        out.append({
+            "id": f"story-{slug}",
+            "n": title,
+            "tr": "Story",
+            "story": 1,
+            "mp": maps,
+            "o": rows,
+            "w": "https://escapefromtarkov.fandom.com/wiki/" + urllib.parse.quote(target.replace(" ", "_")),
+        })
+
+    write_atomic(DATA / "story.json", json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+    print(f"  ストーリー {len(out)} 章 / 目標 {sum(len(c['o']) for c in out)} 行 / "
+          f"{(DATA / 'story.json').stat().st_size:,} バイト", file=sys.stderr)
+    return len(out)
+
+
 def collect_points(scene: dict):
     """シーンから (x, y, z) を全部集める。outline は 1 頂点ずつ別の点として扱う。"""
     out = []
@@ -997,6 +1128,12 @@ def build():
         name = scene["normalizedName"]
         id_to_key[scene["id"]] = SCENE_ALIASES.get(name, name)
     task_counts = build_tasks(args.refresh, id_to_key)
+    # Wiki が落ちていてもほかのデータは作れるようにする（前回の story.json は残る）
+    try:
+        story_count = build_story(args.refresh)
+    except Exception as exc:  # noqa: BLE001 取り込み元が別サイトなので何が起きても続行
+        print(f"  !! ストーリーを取り込めませんでした: {exc}", file=sys.stderr)
+        story_count = len(json.loads((DATA / "story.json").read_text(encoding="utf-8")))             if (DATA / "story.json").exists() else 0
     item_count = build_items(args.refresh)
     landmark_counts = build_landmarks(
         args.refresh, api["maps"], interactive, lang_ja, lang_en,
@@ -1163,6 +1300,8 @@ def build():
         "itemCount": item_count,
         "anyTaskFile": f"data/tasks/{ANY_MAP}.json" if any_count else None,
         "anyTaskCount": any_count,
+        "storyFile": "data/story.json" if story_count else None,
+        "storyCount": story_count,
         # スキーマを変えたら上げる。loadMapDb が照合して食い違いを知らせる
         "version": 2,
         "generated": "build_data.py",
@@ -1237,6 +1376,8 @@ def write_readme_summary(db: dict, task_counts: dict, landmark_counts: dict):
         ("脱出口", f"{sum(len(m.get('extracts') or []) for m in maps)} 箇所", ""),
         ("タスク", f"延べ {task_total} 件（うちマップ非依存 {any_tasks}）",
          f"data/tasks/ {dirsize('data/tasks'):,} B"),
+        ("ストーリー", f"{db.get('storyCount', 0)} 章（Wiki から。地点データなし）",
+         f"data/story.json {size('data/story.json'):,} B"),
         ("名前の付いた地点", f"{lm_total} 件", f"data/landmarks/ {dirsize('data/landmarks'):,} B"),
         ("アイテムの用途", f"{db.get('itemCount', 0)} 種",
          f"data/items.json {size('data/items.json'):,} B"),

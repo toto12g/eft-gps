@@ -9,6 +9,10 @@
  *     o: [ { d: 説明, t: 種類, opt: 任意, z: [ゾーン], l: [候補地点] } ] }
  *   ゾーン       { m: マップ, p: [x,y,z], o: [[x,z], …] 外形 }
  *   候補地点     { m: マップ, p: [[x,y,z], …] }
+ *
+ * メインストーリー（data/story.json）も同じ形に揃えてある。違いは:
+ *   { story: 1, mp: [関わるマップ], o: [ { t: story|start|branch, ind: 字下げ, sm: [マップ] } ] }
+ *   座標は持たない（上流に無い）。sm でどのマップの目標かだけ分かる。
  */
 
 const cache = new Map();
@@ -36,7 +40,13 @@ export const OBJECTIVE_TYPE = {
   sellItem: '売却',
   globalVariable: '進行状況',
   dialogue: '会話',
+  story: 'ストーリー',
+  start: '開始条件',
+  branch: '分岐',
 };
+
+/** ストーリーの一覧。全マップで共通なので 1 回だけ読む。 */
+let storyCache = null;
 
 /**
  * そのマップのタスク一覧を読む。二度目からはキャッシュを返す。
@@ -58,9 +68,9 @@ async function fetchList(file) {
  * @param {string|null} file mapdb の taskFile
  * @param {string|null} [anyFile] マップを問わないタスクのファイル
  */
-export async function loadTasks(mapKey, file, anyFile = null) {
+export async function loadTasks(mapKey, file, anyFile = null, storyFile = null) {
   if (cache.has(mapKey)) return cache.get(mapKey);
-  if (!file && !anyFile) {
+  if (!file && !anyFile && !storyFile) {
     cache.set(mapKey, []);
     return [];
   }
@@ -68,14 +78,22 @@ export async function loadTasks(mapKey, file, anyFile = null) {
     // マップ固有のものと、マップを問わないものを合わせて 1 つの一覧にする。
     // 「任意のマップ」のタスクを全マップのファイルに複製すると重複するので、
     // 別ファイルにして読み込み時に混ぜている。
-    const [own, any] = await Promise.all([
+    const [own, any, story] = await Promise.all([
       file ? fetchList(file) : Promise.resolve([]),
       anyFile ? fetchList(anyFile) : Promise.resolve([]),
+      storyFile ? loadStory(storyFile) : Promise.resolve([]),
     ]);
     // どのマップの一覧に出ているかを覚えておく。座標を持たないタスクを
     // 「インターチェンジ」のようなマップ名で引けるようにするため
     for (const t of own) t.mk = mapKey;
-    const out = [...own, ...any];
+    // ストーリーは全マップに出す。「Therapist と話す」のようにマップを
+    // 問わない目標が続くので、関わらないマップで消えると進行を追えなくなる。
+    // このマップに関わる章を先に並べる
+    const storyHere = [
+      ...story.filter((c) => (c.mp || []).includes(mapKey)),
+      ...story.filter((c) => !(c.mp || []).includes(mapKey)),
+    ];
+    const out = [...storyHere, ...own, ...any];
     cache.set(mapKey, out);
     return out;
   } catch (err) {
@@ -87,9 +105,21 @@ export async function loadTasks(mapKey, file, anyFile = null) {
   }
 }
 
+/** ストーリーを読む。読めなくてもトレーダーのタスクは出したいので、失敗は空にする。 */
+async function loadStory(file) {
+  if (storyCache) return storyCache;
+  try {
+    storyCache = await fetchList(file);
+    return storyCache;
+  } catch {
+    return [];
+  }
+}
+
 /** キャッシュを捨てて読み直せるようにする（診断用）。 */
 export function clearTaskCache() {
   cache.clear();
+  storyCache = null;
 }
 
 /**
@@ -155,6 +185,56 @@ export const TRADER_ALIASES = {
   'Btr Driver': 'BTR BTR運転手 装甲車',
 };
 
+/** マップの表示名（日本語の呼び名の 1 つ目）。 */
+export function mapName(key) {
+  return (MAP_ALIASES[key] || key).split(' ')[0];
+}
+
+/**
+ * 一覧で使うトレーダーの並び。ゲーム内のトレーダー画面の順にする。
+ * ストーリーは先頭。ここに無いトレーダーは最後に名前順で付く。
+ */
+export const TRADER_ORDER = [
+  'Story', 'Prapor', 'Therapist', 'Fence', 'Skier', 'Peacekeeper', 'Mechanic',
+  'Ragman', 'Jaeger', 'Ref', 'Lightkeeper', 'Btr Driver',
+];
+
+/** グループの見出し。ストーリーだけは「トレーダー名」ではないので言い換える。 */
+export function traderLabel(tr) {
+  if (tr === 'Story') return 'メインストーリー';
+  const ja = TRADER_ALIASES[tr];
+  return ja ? `${tr}（${ja.split(' ')[0]}）` : tr;
+}
+
+/**
+ * トレーダーごとにまとめる。中は必要レベル → 名前の順。
+ * マップ固有のものと「任意のマップ」のものは別ファイルから来るので、
+ * ここで混ぜて並べ直す（そのままだと同じトレーダーが 2 箇所に出る）。
+ * ストーリーは章の並び（このマップに関わる章が先）を崩さない。
+ * @returns {{trader:string, label:string, tasks:Object[]}[]}
+ */
+export function groupTasks(tasks) {
+  const groups = new Map();
+  for (const t of tasks) {
+    const key = t.tr || '?';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  const rank = (tr) => {
+    const i = TRADER_ORDER.indexOf(tr);
+    return i < 0 ? TRADER_ORDER.length : i;
+  };
+  return [...groups.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(([trader, list]) => ({
+      trader,
+      label: traderLabel(trader),
+      tasks: trader === 'Story'
+        ? list
+        : [...list].sort((a, b) => (a.lv || 0) - (b.lv || 0) || String(a.n).localeCompare(String(b.n))),
+    }));
+}
+
 /**
  * 検索用に文字を揃える。
  *
@@ -190,9 +270,12 @@ export function searchText(task) {
     parts.push(o.d || '');
     for (const z of o.z || []) parts.push(z.m || '', MAP_ALIASES[z.m] || '');
     for (const l of o.l || []) parts.push(l.m || '', MAP_ALIASES[l.m] || '');
+    for (const m of o.sm || []) parts.push(m, MAP_ALIASES[m] || '');
   }
   // 座標を持たないタスクは、どのマップの一覧に出ているかで引けるようにする
   if (task.mk) parts.push(task.mk, MAP_ALIASES[task.mk] || '');
+  // トレーダーの別名と同じ扱いにすると、英文中の "history" にも当たってしまう
+  if (task.story) parts.push('ストーリー メインストーリー story');
 
   // トレーダーの和名は、クエストの提供者だけでなく目標文に出てくる名前にも
   // 当てる（「Ragman に渡す」が目標のタスクは提供者が別人のことがある）。
@@ -258,6 +341,8 @@ export function taskKeyDoors(task, landmarks) {
 
 /** その目標が、このマップで意味を持つか。 */
 export function objectiveApplies(objective, mapKey) {
+  // ストーリーの目標は座標を持たず、関わるマップの名前だけを持つ
+  if ((objective.sm || []).length) return objective.sm.includes(mapKey);
   const hasPlace = (objective.z || []).length || (objective.l || []).length;
   if (!hasPlace) return true; // 場所を持たない目標はどのマップでも意味がある
   const g = objectiveGeometry(objective, mapKey);
@@ -307,6 +392,7 @@ export function taskLoadout(task, mapKey) {
 
 /** 一覧に出すラベル。 */
 export function taskLabel(task) {
+  if (task.story) return `[ストーリー] ${task.n}`;
   const lv = task.lv ? ` Lv${task.lv}` : '';
   const any = task.any ? '〈任意〉' : '';
   return `${any}[${task.tr}${lv}] ${task.n}${task.kap ? ' ★' : ''}`;
