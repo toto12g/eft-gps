@@ -59,7 +59,23 @@ export const DEFAULT_THRESHOLDS = {
    * MapTracker の bbox 判定と同じ値。
    */
   bboxMargin: 40,
+  /**
+   * 時計が止まっているとき、そのマップの点からこれ以内ならそのマップにいるとみなす (m)。
+   * Factory の実レイド 8 枚は 1.5〜5.3m。ハイドアウトは Factory から 16.4m 離れている。
+   */
+  frozenNearM: 8,
 };
+
+/**
+ * ゲーム内時計が止まるマップ。
+ *
+ * Factory はレイド中ずっと時刻が同じ（実レイドで 4 分間 3.03 のまま）。
+ * しかも座標が原点付近にあって Reserve・Labyrinth と重なるため、
+ * 座標だけでは「どのマップからも等距離」= ハイドアウトと区別できず、
+ * 8 枚中 6 枚がレイド外として捨てられて現在地が動かなかった。
+ * 時計が止まっていること自体を、Factory にいる手がかりにする。
+ */
+export const FROZEN_CLOCK_MAPS = ['factory'];
 
 /**
  * そのレイドのサンプルを覚えて、マップを累積で判定する。
@@ -110,11 +126,17 @@ export class MapTracker {
     this.window = [];
     this.lastAt = null;
     this.db = null;
+    /** 直前の 1 枚のゲーム内時刻。レイド外として取り消した 1 枚でも残す */
+    this.lastClock = null;
+    /** 直前に足した 1 枚で、ゲーム内時計が止まっていたか */
+    this.clockFrozen = false;
   }
 
   reset() {
     this.window = [];
     this.lastAt = null;
+    this.lastClock = null;
+    this.clockFrozen = false;
     this.brokeAt = null;
     this.outOfRaidRun = 0;
   }
@@ -176,6 +198,23 @@ export class MapTracker {
 
     this.lastAt = at;
     this.outOfRaidRun = 0;
+
+    // ゲーム内時計は実時間の 7 倍で進み、ファイル名には 0.01 時間刻みで出る。
+    // 実時間で 10 秒あれば 0.019 時間進むので、同じ値のままなら止まっている
+    // 10 秒未満の連写では進んだかどうか分からないので、時刻が同じなら直前の判断を引き継ぐ
+    // （引き継がないと、連写の 2 枚目で累積が Woods を選んで地図が飛んだ）
+    const wasFrozen = this.clockFrozen;
+    this.clockFrozen = false;
+    if (typeof sample.gameTime === 'number') {
+      const prev = this.lastClock;
+      if (prev && Math.abs(sample.gameTime - prev.gameTime) < 0.005) {
+        this.clockFrozen = at - prev.at >= 10000 || wasFrozen;
+      }
+      // 引き継いだときは、最初に止まっていると分かった時刻を基準に残す
+      if (!(this.clockFrozen && prev && at - prev.at < 10000)) {
+        this.lastClock = { gameTime: sample.gameTime, at };
+      }
+    }
 
     const entry = {
       at,
@@ -346,6 +385,21 @@ export function validateSample({
     consensus !== null && consensus.n >= th.trackerMinSamples && consensus.ratio >= th.trackerRatio;
 
   const base = { best, d1, second, d2, ratio, clock, consensus, ranking, suggest: best };
+
+  // 0: ゲーム内時計が止まっていて、時計の止まるマップ（Factory）の点が近い。
+  //    座標だけでは原点付近の「どのマップからも等距離」に見えるので、ここで先に決める。
+  //    累積も Reserve や Labyrinth に引っ張られるので、それより前に置く。
+  if (tracker && tracker.clockFrozen) {
+    const hit = ranking.find((r) => FROZEN_CLOCK_MAPS.includes(r.key) && r.d < th.frozenNearM);
+    const map = hit && db.maps.find((m) => m.key === hit.key);
+    if (map && inBbox(map, sample.x, sample.y, sample.z, th.bboxMargin)) {
+      const why = `ゲーム内時計が止まっている（${hit.key} の点から ${hit.d.toFixed(1)}m）`;
+      if (hit.key === selectedKey) {
+        return { ...base, suggest: hit.key, verdict: VERDICT.ACCEPT, reason: why };
+      }
+      return { ...base, suggest: hit.key, verdict: VERDICT.WRONG_MAP, via: 'single', reason: why };
+    }
+  }
 
   // C: どのマップからも等距離 = 原点付近。ハイドアウトやメニュー。
   //    時計が合っていればレイド中と分かるし、累積で行き先が定まっていれば

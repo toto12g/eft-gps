@@ -2856,6 +2856,84 @@ await check('Wiki で補ったタスクは上流のタスクと重複しない',
   return '重複なし';
 });
 
+/* --------------------------------------------------------------------- T32 */
+
+group('T32 Factory で現在地が動かない不具合（報告された不具合）');
+
+// 2026-10-20 の Factory のレイド（実機 9 枚, 03:57〜04:01）。[更新時刻 ms, ファイル名]
+// ゲーム内時刻が 3.03 のまま止まり、座標は原点付近で Reserve・Labyrinth と重なる。
+// 修正前は 9 枚中 7 枚が「レイド外」として捨てられ、現在地が動かなかった。
+const FACTORY_RAID = [
+  [1792436225000, '2026-10-20[03-57]_-17.11, 1.78, -41.22_0.00000, 0.70711, 0.00000, -0.70711_3.03 (0).png'],
+  [1792436243000, '2026-10-20[03-57]_1.10, 1.47, -21.36_-0.06071, 0.68946, -0.05838, -0.71941_3.03 (0).png'],
+  [1792436248000, '2026-10-20[03-57]_0.77, 1.55, -29.15_-0.02412, 0.13996, -0.00560, -0.98985_3.03 (0).png'],
+  [1792436278000, '2026-10-20[03-57]_12.06, -1.01, -20.56_0.12264, 0.58951, -0.09161, 0.79312_3.03 (0).png'],
+  [1792436317000, '2026-10-20[03-58]_23.61, -1.19, -13.32_-0.21384, 0.62520, -0.18370, -0.72777_3.03 (0).png'],
+  [1792436327000, '2026-10-20[03-58]_19.31, -1.11, -17.48_-0.01725, 0.95875, -0.05872, -0.27759_3.03 (0).png'],
+  [1792436338000, '2026-10-20[03-58]_6.19, -1.21, -32.36_-0.04253, 0.72931, -0.04481, -0.68139_3.03 (0).png'],
+  [1792436441000, '2026-10-20[04-00]_15.50, -1.13, -25.06_-0.03034, -0.08126, 0.00218, -0.99623_3.03 (0).png'],
+  [1792436477000, '2026-10-20[04-01]_46.09, 1.23, -30.53_-0.02710, 0.76902, -0.03267, -0.63781_3.03 (0).png'],
+];
+
+/** applySample と同じ流れ（自動切り替え・レイド外の取り消し込み）で流す。 */
+function runRaid(shots, selected) {
+  const t = new MapTracker();
+  let sel = selected;
+  let pending = null;
+  const out = [];
+  for (const [ms, f] of shots) {
+    const s = parseScreenshotName(f);
+    t.add(s, db, ms);
+    let v = validateSample({ sample: s, selectedKey: sel, db, fileModifiedMs: ms, tracker: t });
+    if (v.verdict === VERDICT.WRONG_MAP) {
+      if (v.via === 'consensus' || pending === v.suggest) {
+        sel = v.suggest;
+        pending = null;
+        v = validateSample({ sample: s, selectedKey: sel, db, fileModifiedMs: ms, tracker: t });
+      } else pending = v.suggest;
+    } else if (v.verdict !== VERDICT.NOT_IN_RAID) pending = null;
+    if (v.verdict === VERDICT.NOT_IN_RAID) t.undoLast();
+    out.push({ sel, verdict: v.verdict });
+  }
+  return out;
+}
+
+await check('Factory を選んでいれば全枚数で現在地が動く', () => {
+  const r = runRaid(FACTORY_RAID, 'factory');
+  const bad = r.filter((x) => x.sel !== 'factory' || x.verdict !== VERDICT.ACCEPT);
+  eq(bad.length, 0, `動かなかった・飛んだ: ${bad.map((x) => `${x.sel}/${x.verdict}`).join(', ')}`);
+  return `${r.length} 枚すべて factory で確定`;
+});
+
+await check('別のマップを選んでいても Factory に切り替わって、そのまま留まる', () => {
+  for (const start of ['customs', 'streets-of-tarkov', 'reserve']) {
+    const r = runRaid(FACTORY_RAID, start);
+    const firstFactory = r.findIndex((x) => x.sel === 'factory');
+    truthy(firstFactory >= 0 && firstFactory <= 1, `${start} から factory に切り替わらない`);
+    truthy(r.slice(firstFactory).every((x) => x.sel === 'factory'), `${start}: factory から別マップへ飛んだ`);
+  }
+  return '2 枚目までに factory へ切り替わり、以後は動かない';
+});
+
+await check('時計が止まっていてもハイドアウトはレイド外のまま', () => {
+  // ハイドアウトは Factory の点から 16.4m 離れている。時計が止まっていても拾わない
+  const t = new MapTracker();
+  const h = parseScreenshotName(HIDEOUT);
+  t.add(h, db, MTIME.hideout);
+  t.add(h, db, MTIME.hideout + 60000);
+  truthy(t.clockFrozen, '同じ時刻の 2 枚で止まっていると判定されていない');
+  const v = validateSample({ sample: h, selectedKey: 'factory', db, fileModifiedMs: MTIME.hideout + 60000, tracker: t });
+  eq(v.verdict, VERDICT.NOT_IN_RAID, `ハイドアウトが ${v.verdict} になった`);
+  return v.reason;
+});
+
+await check('ふつうに進む時計は「止まっている」と判定しない', () => {
+  const t = new MapTracker();
+  CUSTOMS_RAID.forEach((f, i) => t.add(parseScreenshotName(f), db, 1788000000000 + i * 30000));
+  truthy(!t.clockFrozen, 'Customs のレイドで時計が止まっていると判定された');
+  return 'Customs 16 枚で一度も止まっていない';
+});
+
 /* -------------------------------------------------------------------- 出力 */
 
 const pass = results.filter((r) => r.ok === true).length;
