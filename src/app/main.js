@@ -575,7 +575,7 @@ function renderTaskOptions() {
     // 選んでから「何も出ない」と気づくより、選ぶ前に分かるほうがよい
     const hasPlace = taskPoints(t, state.selectedKey).length > 0;
     // ストーリーは地点を持たないので、代わりにこのマップの目標数を添える
-    const here = t.story ? storyHereCount(t) : 0;
+    const here = t.story || t.wk ? storyHereCount(t) : 0;
     opt.textContent =
       (state.doneTasks.has(t.id) ? '✓ ' : '') + (hasPlace ? '◎ ' : '　') + taskLabel(t)
       + (here ? `（このマップの目標 ${here} 件）` : '');
@@ -666,10 +666,13 @@ function selectTask(id) {
     setStatus(`「${state.activeTask.n}」は地点データがありません（鍵の扉だけ表示）`, 'low');
     return;
   }
-  if (state.activeTask.story) {
+  if (state.activeTask.story || state.activeTask.wk) {
     const n = storyHereCount(state.activeTask);
+    const what = state.activeTask.story
+      ? 'ストーリーの章です'
+      : 'tarkov.dev にまだ無いタスクで、Wiki の目標文だけを載せています';
     setStatus(
-      `「${state.activeTask.n}」はストーリーの章です。地点データは無いので、目標の一覧と Wiki を見てください`
+      `「${state.activeTask.n}」は${what}。地点データは無いので、目標の一覧と Wiki を見てください`
         + (n ? `（このマップの目標 ${n} 件）` : ''),
       'low',
     );
@@ -743,7 +746,8 @@ function renderObjectives() {
   box.innerHTML = '';
   if (!state.activeTask) return;
 
-  if (state.activeTask.story) {
+  // Wiki で補ったタスクも、座標を持たずマップ名だけを持つ点はストーリーと同じ
+  if (state.activeTask.story || state.activeTask.wk) {
     renderStoryObjectives(box, state.activeTask);
     return;
   }

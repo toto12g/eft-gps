@@ -632,6 +632,9 @@ def build_tasks(refresh: bool, id_to_key: dict):
     # 上流の ja 辞書には課題名の和訳が 1 件も無く（517 件すべて英語が返る）、
     # 課題名は常に英語になる。逆に目標の description は和訳されている。
     # つまり検索は「英語の課題名」と「日本語の目標文」の両方に当たる必要がある。
+    # Wiki と照合するための英語のタスク名。訳を当てると一部が日本語になる
+    raw = payload["data"]["tasks"]
+    en_names = {en.get(t.get("name"), t.get("name")) for t in (raw.values() if isinstance(raw, dict) else raw)}
     ja, swapped = fix_swapped_verbs(payload, ja, en)
     n = apply_translations(payload, ja, en)
     print(f"  タスクの表示名を解決: {n} 件（訳の入れ替わりを直した {swapped} 件）", file=sys.stderr)
@@ -788,6 +791,13 @@ def build_tasks(refresh: bool, id_to_key: dict):
 
     out_dir = DATA / "tasks"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # tarkov.dev に無いタスクを Wiki で補う。Wiki が読めなくても続行する
+    try:
+        supplement_from_wiki(refresh, en_names | {t.get("name") or "" for t in tasks}, by_map, out_dir)
+    except Exception as exc:  # noqa: BLE001 取り込み元が別サイトなので何が起きても続行
+        print(f"  !! Wiki でタスクを補えませんでした: {exc}", file=sys.stderr)
+
     for stale in out_dir.glob("*.json"):
         stale.unlink()
 
@@ -939,6 +949,106 @@ def build_story(refresh: bool):
     print(f"  ストーリー {len(out)} 章 / 目標 {sum(len(c['o']) for c in out)} 行 / "
           f"{(DATA / 'story.json').stat().st_size:,} バイト", file=sys.stderr)
     return len(out)
+
+
+def task_key(name: str) -> str:
+    """タスク名を照合用に揃える。"[PVP ZONE]" の付け方や記号の違いは無視する。"""
+    s = re.sub(r"\[pvp zone\]", "", (name or "").lower())
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+def supplement_from_wiki(refresh: bool, upstream_names: set, by_map: dict, prev_dir: Path):
+    """tarkov.dev に無いタスクを Wiki のクエスト一覧で補う。
+
+    2026-10 の時点で tarkov.dev は 1.0 で作り直された Lightkeeper のタスク
+    （"To the Light - …"）を持っておらず、Make Amends 系は丸ごと消えていた。
+    Wiki のクエスト一覧で今も確認できるものだけを足す。
+      - 前回のビルドに入っていたもの（座標つき）は、そのまま残す
+      - それ以外は Wiki の目標文とマップ名だけで載せる（座標は無い）
+    アリーナ専用（Ref の Gladiator Life など、マップを名指ししないもの）と
+    プレステージは対象にしない。by_map を直接書き換える。
+    """
+    api = "https://escapefromtarkov.fandom.com/api.php?action=parse&prop=wikitext&format=json&redirects=1&page=Quests"
+    text = json.loads(fetch(api, "wiki_quests.json", refresh))["parse"]["wikitext"]["*"]
+    traders = re.findall(r"class=wds-tabs__tab-label\|([^\]]+)\]\]", text)
+    contents = text.split('<div class="wds-tab__content')[1:]
+
+    have = {task_key(n) for n in upstream_names}
+    # 前回のビルド。同じタスクがマップごとに 1 件ずつ入っている
+    prev = {}
+    for f in prev_dir.glob("*.json"):
+        try:
+            recs = json.loads(f.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        for r in recs:
+            if r.get("wk"):
+                continue  # 前回 Wiki から足したものは、今回も Wiki から作り直す
+            prev.setdefault(task_key(r.get("n")), []).append((f.stem, r))
+
+    kept = built = 0
+    for trader, body in zip(traders, contents):
+        # 上流のトレーダー名は normalizedName を整えたもの（"btr-driver" → "Btr Driver"）
+        tr = trader.replace("-", " ").title()
+        for row in body.split("\n|-")[1:]:
+            m = re.match(r"\s*\|\s*\[\[([^\]|]+)(?:\|([^\]]*))?\]\]", row)
+            if not m:
+                continue
+            target = m.group(1).strip()
+            name = (m.group(2) or target).strip()
+            key = task_key(name)
+            if key in have or "(Prestige" in name:
+                continue
+
+            if key in prev:
+                for map_key, r in prev[key]:
+                    by_map.setdefault(map_key, []).append(r)
+                have.add(key)
+                kept += 1
+                continue
+
+            # 行は「| [[名前]] / | 目標の箇条書き / | 報酬」の 3 列
+            cols = re.split(r"\n\|", "\n" + row.lstrip())
+            at = next((i for i, c in enumerate(cols) if "[[" + target in c), -1)
+            objectives = cols[at + 1] if 0 <= at < len(cols) - 1 else ""
+            rows = []
+            for line in objectives.splitlines():
+                b = re.match(r"^\s*(\*+)\s*(.*)$", line)
+                if not b:
+                    continue
+                d, maps = wiki_plain(b.group(2))
+                opt = bool(re.match(r"^\(Optional\)\s*", d, re.I))
+                d = re.sub(r"^\(Optional\)\s*", "", d, flags=re.I)
+                if not d:
+                    continue
+                o = {"d": d, "t": "wiki"}
+                if len(b.group(1)) > 1:
+                    o["ind"] = len(b.group(1)) - 1
+                if opt:
+                    o["opt"] = 1
+                if maps:
+                    o["sm"] = maps
+                rows.append(o)
+            maps = list(dict.fromkeys(k for o in rows for k in o.get("sm", [])))
+            if not rows or (trader == "Ref" and not maps):
+                continue
+
+            rec = {
+                "id": "wiki-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-"),
+                "n": name,
+                "tr": tr,
+                "lv": None,
+                "wk": 1,
+                "o": rows,
+                "w": "https://escapefromtarkov.fandom.com/wiki/" + urllib.parse.quote(target.replace(" ", "_")),
+            }
+            for map_key in maps or [ANY_MAP]:
+                by_map.setdefault(map_key, []).append(dict(rec))
+            have.add(key)
+            built += 1
+
+    print(f"  Wiki でタスクを補った: 前回のデータを残した {kept} 件 / Wiki の目標文で作った {built} 件",
+          file=sys.stderr)
 
 
 def collect_points(scene: dict):

@@ -2824,6 +2824,38 @@ await check('サイドバーの折りたたみ欄がそろっている', async (
   return secs.join(' / ');
 });
 
+/* --------------------------------------------------------------------- T31 */
+
+group('T31 tarkov.dev に無いタスクを Wiki で補う');
+
+const lighthouseTasks = await loadTasks(
+  'lighthouse', '../data/tasks/lighthouse.json', '../data/tasks/_any.json', '../' + db.storyFile,
+);
+
+await check('Lighthouse に上流で抜けたタスクが入っている', () => {
+  const names = new Set(lighthouseTasks.map((t) => t.n));
+  // 2026-10 に tarkov.dev から消えた／まだ入っていないもの
+  for (const n of ['To the Light - Getting Acquainted', 'Honest Review', 'Make Amends - Security']) {
+    truthy(names.has(n), `${n} が無い`);
+  }
+  // Make Amends は前回の座標つきデータを残しているので、地図に出せる
+  const sec = lighthouseTasks.find((t) => t.n === 'Make Amends - Security');
+  truthy(taskPoints(sec, 'lighthouse').length > 0, 'Make Amends - Security の地点が無い');
+  return `${lighthouseTasks.filter((t) => t.wk).length} 件を Wiki から補った`;
+});
+
+await check('Wiki で補ったタスクは上流のタスクと重複しない', () => {
+  const key = (n) => String(n).toLowerCase().replace(/\[pvp zone\]/g, '').replace(/[^a-z0-9]/g, '');
+  const up = new Set(lighthouseTasks.filter((t) => !t.wk && !t.story).map((t) => key(t.n)));
+  const dup = lighthouseTasks.filter((t) => t.wk && up.has(key(t.n))).map((t) => t.n);
+  eq(dup.length, 0, `重複: ${dup.join(', ')}`);
+  for (const t of lighthouseTasks.filter((x) => x.wk)) {
+    truthy(String(t.w).startsWith('https://escapefromtarkov.fandom.com/wiki/'), `Wiki が無い: ${t.n}`);
+    truthy(taskLabel(t).endsWith('※Wiki'), `印が無い: ${taskLabel(t)}`);
+  }
+  return '重複なし';
+});
+
 /* -------------------------------------------------------------------- 出力 */
 
 const pass = results.filter((r) => r.ok === true).length;

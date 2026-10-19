@@ -13,6 +13,8 @@
  * メインストーリー（data/story.json）も同じ形に揃えてある。違いは:
  *   { story: 1, mp: [関わるマップ], o: [ { t: story|start|branch, ind: 字下げ, sm: [マップ] } ] }
  *   座標は持たない（上流に無い）。sm でどのマップの目標かだけ分かる。
+ *
+ * tarkov.dev にまだ無いタスクを Wiki で補ったもの（wk: 1）も同じ形の目標を持つ。
  */
 
 const cache = new Map();
@@ -41,6 +43,7 @@ export const OBJECTIVE_TYPE = {
   globalVariable: '進行状況',
   dialogue: '会話',
   story: 'ストーリー',
+  wiki: 'Wiki',
   start: '開始条件',
   branch: '分岐',
 };
@@ -366,5 +369,7 @@ export function taskLabel(task) {
   if (task.story) return `[ストーリー] ${task.n}`;
   const lv = task.lv ? ` Lv${task.lv}` : '';
   const any = task.any ? '〈任意〉' : '';
-  return `${any}[${task.tr}${lv}] ${task.n}${task.kap ? ' ★' : ''}`;
+  // Wiki で補ったタスク（tarkov.dev にまだ無い）は地点を持たないので印を付ける
+  const wiki = task.wk ? ' ※Wiki' : '';
+  return `${any}[${task.tr}${lv}] ${task.n}${task.kap ? ' ★' : ''}${wiki}`;
 }
