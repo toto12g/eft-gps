@@ -169,6 +169,27 @@ details.about[open] > summary { margin-bottom: 4px; }
 .extract-icon .ex-circle { border-radius: 50%; }
 .extract-icon .ex-square { border-radius: 2px; }
 .extract-icon .ex-triangle { border-radius: 2px; transform: rotate(45deg); }
+/* 電源が要る脱出口。印を一回り大きくして、中に記号（A, B, …）を入れる */
+.extract-icon.has-code .dot { left: -10px; top: -10px; width: 20px; height: 20px; }
+.extract-icon .code {
+  position: absolute; left: -10px; top: -10px; width: 20px; height: 20px;
+  font: 700 12px/20px var(--mono); text-align: center; color: var(--c);
+  text-shadow: 0 0 2px #0a0c0d;
+}
+.extract-icon.has-code .label { left: 14px; }
+.extract-icon.has-code .sw { left: 7px; top: -18px; }
+/* 電源・スイッチ。脱出口と同じ記号を付けて対応させる */
+.switch-icon > span { position: absolute; }
+.switch-icon .mark {
+  left: -11px; top: -11px; min-width: 22px; height: 22px; padding: 0 3px;
+  background: #ffe066; color: #14110a; border: 2px solid #0a0c0d; border-radius: 3px;
+  font: 700 11px/18px var(--mono); text-align: center;
+  box-shadow: 0 0 8px rgba(255,224,102,.75), 0 0 3px rgba(0,0,0,.9);
+}
+.switch-icon .label {
+  left: 16px; top: -8px; white-space: nowrap; font: 600 12px/1.4 var(--mono); color: #ffe066;
+  text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d;
+}
 .extract-icon .sw {
   position: absolute; left: 4px; top: -14px; font-size: 11px; line-height: 1;
   color: #ffe066; text-shadow: 0 0 3px #0a0c0d, 0 0 3px #0a0c0d;

@@ -505,9 +505,9 @@ Service Worker は**ネットワーク優先・キャッシュ退避**にして�
 | ストーリー | 10 章（Wiki から。地点データなし） | data/story.json 39,962 B |
 | 名前の付いた地点 | 3593 件 | data/landmarks/ 252,161 B |
 | アイテムの用途 | 635 種 | data/items.json 272,970 B |
-| メタデータ |  | data/mapdb.json 64,390 B |
+| メタデータ |  | data/mapdb.json 64,774 B |
 
-生成 2026-10-19 15:42 / スキーマ v2
+生成 2026-10-23 01:51 / スキーマ v2
 <!-- data:end -->
 
 ## 状態

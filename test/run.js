@@ -39,6 +39,7 @@ import {
   clearTaskCache, shortObjectiveText,
 } from '../src/app/tasks.js';
 import { loadLandmarks, LAYERS, DEFAULT_ENABLED, hazardLabel, bossLabel } from '../src/app/landmarks.js';
+import { switchTag, switchKind } from '../src/app/map.js';
 import {
   loadItems, searchItems, topItems, useKinds, hideoutTotal, useSummary,
 } from '../src/app/items.js';
@@ -2932,6 +2933,51 @@ await check('ふつうに進む時計は「止まっている」と判定しな�
   CUSTOMS_RAID.forEach((f, i) => t.add(parseScreenshotName(f), db, 1788000000000 + i * 30000));
   truthy(!t.clockFrozen, 'Customs のレイドで時計が止まっていると判定された');
   return 'Customs 16 枚で一度も止まっていない';
+});
+
+/* --------------------------------------------------------------------- T33 */
+
+group('T33 電源が要る脱出口と電源の場所');
+
+await check('スイッチが要る脱出口は一部だけ（上流の全件指定を真に受けない）', () => {
+  // 2026-10 の上流は Customs の 28 か所すべてにスイッチを付けていた。
+  // Labs は実際に 7 か所中 6 か所で電源が要るので除く
+  for (const m of db.maps.filter((x) => x.key !== 'the-lab')) {
+    const all = (m.extracts || []).length;
+    const sw = (m.extracts || []).filter((e) => e.sw).length;
+    truthy(all < 4 || sw < all / 2, `${m.key} の脱出口 ${all} か所中 ${sw} か所がスイッチ要になっている`);
+  }
+  const lab = db.byKey.get('the-lab').extracts.filter((e) => e.sw).map((e) => e.name);
+  for (const n of ['Main Elevator', 'Medical Block Elevator', 'Cargo Elevator', 'Hangar Gate', 'Parking Gate']) {
+    truthy(lab.includes(n), `Labs の ${n} にスイッチの印が無い`);
+  }
+  truthy(!lab.includes('Ventilation Shaft'), 'Ventilation Shaft にスイッチの印が付いた');
+  return `Labs: ${lab.join(', ')}`;
+});
+
+await check('電源の場所が脱出口と同じ記号で結ばれている', () => {
+  const main = db.byKey.get('the-lab').extracts.find((e) => e.name === 'Main Elevator');
+  truthy(main.code, 'Main Elevator に記号が無い');
+  const power = main.sw.find((s) => /Power/.test(s.n));
+  truthy(power && power.p.length === 3, 'Main Elevator の電源の位置が無い');
+  eq(switchKind(power.n), '電源', '電源の表示名');
+  // その場で押す呼び出しボタンは印にしない（脱出口から 6m 以内）
+  truthy(!main.sw.some((s) => /Call/.test(s.n)), '呼び出しボタンまで印になっている');
+  const codes = new Set();
+  for (const e of db.byKey.get('the-lab').extracts) if (e.code) codes.add(e.code);
+  eq(codes.size, db.byKey.get('the-lab').extracts.filter((e) => e.code).length, '記号が重複している');
+  eq(switchTag('A', 0, 1), 'A', '1 つなら番号なし');
+  eq(switchTag('A', 1, 2), 'A2', '複数なら番号つき');
+  return `Main Elevator = ${main.code}、電源は ${power.fl || '?'}`;
+});
+
+await check('脱出口に階が付いている', () => {
+  const lab = db.byKey.get('the-lab').extracts;
+  truthy(lab.every((e) => e.fl), 'Labs の脱出口に階の無いものがある');
+  truthy(lab.some((e) => e.fl === 'B1'), 'Labs に地下の脱出口が無い');
+  const customs = db.byKey.get('customs').extracts.find((e) => e.name === 'ZB-1011');
+  eq(customs && customs.fl, 'B1', 'ZB-1011 は地下');
+  return lab.map((e) => `${e.name}(${e.fl})`).join(', ');
 });
 
 /* -------------------------------------------------------------------- 出力 */

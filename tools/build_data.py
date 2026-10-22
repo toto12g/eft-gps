@@ -1051,6 +1051,118 @@ def supplement_from_wiki(refresh: bool, upstream_names: set, by_map: dict, prev_
           file=sys.stderr)
 
 
+# スイッチを入れないと使えない脱出口と、入れる順のスイッチ。
+#
+# 上流の extracts[].switch は 2026-10 に壊れ、Customs の脱出口 28 か所すべてが
+# 「ZB-013 Power Switch」を、Labs の 7 か所すべてが「Med Elevator Extract Button」を
+# 要求することになった。壊れる前（2026-09）の上流は 10 か所だけを正しく結んでいたので、
+# それと上流のスイッチ同士の関係（activatedBy / activates）から、ここで表にする。
+# 脱出口の名前・スイッチの名前で引く（ID は上流で振り直されることがある）。
+EXTRACT_SWITCHES = {
+    "the-lab": {
+        "Main Elevator": ["Main Elevator Power Button", "Main Elevator Call Button"],
+        "Medical Block Elevator": ["Med Elevator Power Button", "Med Elevator Call Button"],
+        "Cargo Elevator": ["Cargo Elevator Power Button", "Cargo Elevator Call Button"],
+        "Hangar Gate": ["Hangar Gate Switch"],
+        "Parking Gate": ["Parking Gate Switch"],
+        "Sewage Conduit": ["Sewage Conduit Pump Button"],
+    },
+    "reserve": {
+        "D-2": ["D-2 Power Switch", "D-2 Door Switch"],
+        "Bunker Hermetic Door": ["Bunker Hermetic Door Power Switch"],
+    },
+    "interchange": {
+        "Saferoom Exfil": ["Mall Main Power Switch", "Saferoom Exfil Unlock Switch", "Saferoom Exfil Switch"],
+    },
+    "customs": {
+        # 2026-10 に脱出口が ZB-013 → ZB-1013 に改名された（座標は同じ）
+        "ZB-1013": ["ZB-013 Power Switch"],
+    },
+}
+# 脱出口からこれ以内のスイッチは、その場で押すもの（呼び出しボタン）なので印を付けない (m)
+SWITCH_AT_EXTRACT_M = 6.0
+
+
+def floor_label(td, x, y, z):
+    """その地点の階を「1F」「2F」「B1」の形で返す。階の無いマップは None。
+
+    アプリの pickFloor（main.js）と同じ規則: 高さが範囲に入り、平面の矩形が
+    あればその中にあるレイヤのうち、下限の高いものを採る。どれにも入らなければ地上。
+    """
+    layers = (td or {}).get("layers") or []
+    if not layers:
+        return None
+    best = None
+    for L in layers:
+        for ex in L.get("extents") or []:
+            lo, hi = (ex.get("height") or [-math.inf, math.inf])[:2]
+            if not (lo <= y < hi):
+                continue
+            rects = ex.get("bounds") or []
+            if rects and not any(
+                min(r[0][0], r[1][0]) <= x <= max(r[0][0], r[1][0])
+                and min(r[0][1], r[1][1]) <= z <= max(r[0][1], r[1][1])
+                for r in rects
+            ):
+                continue
+            if best is None or lo > best[1] or (lo == best[1] and hi - lo < best[2]):
+                best = (L, lo, hi - lo)
+    if best is None:
+        return "1F"
+    name = best[0].get("name") or ""
+    m = re.match(r"^(\d+)(?:st|nd|rd|th) Floor$", name)
+    if m:
+        return f"{m.group(1)}F"
+    if name == "Second Level":
+        return "2F"
+    if name in ("Underground", "Tunnels", "Bunkers", "Technical", "Basement"):
+        return "B1"
+    return name
+
+
+def annotate_extracts(entry: dict, switches: list, td):
+    """脱出口に階と、要るスイッチ（記号 A, B, … つき）を書き込む。entry を直接書き換える。"""
+    by_name = {(s.get("name") or "").lower(): s for s in switches if s.get("position")}
+    table = EXTRACT_SWITCHES.get(entry["key"], {})
+    code = 0
+    for e in entry.get("extracts") or []:
+        p = e.get("position")
+        if p:
+            fl = floor_label(td, p["x"], p["y"], p["z"])
+            if fl:
+                e["fl"] = fl
+        names = table.get(e.get("name"))
+        if not names:
+            continue
+        sw = []
+        for n in names:
+            s = by_name.get(n.lower())
+            if not s:
+                print(f"  !! {entry['key']} の脱出口「{e['name']}」のスイッチ「{n}」が上流に無い",
+                      file=sys.stderr)
+                continue
+            q = s["position"]
+            if p and math.dist((p["x"], p["z"]), (q["x"], q["z"])) <= SWITCH_AT_EXTRACT_M:
+                continue
+            rec = {"n": n, "p": [round(q["x"], 2), round(q["y"], 2), round(q["z"], 2)]}
+            fl = floor_label(td, q["x"], q["y"], q["z"])
+            if fl:
+                rec["fl"] = fl
+            sw.append(rec)
+        # スイッチがすべて脱出口のそばでも、「要る」こと自体は示す
+        e["sw"] = sw
+        e["code"] = chr(ord("A") + code)
+        code += 1
+    # 同じ名前の脱出口（PMC 用とスカブ用）は同じ記号にする
+    codes = {}
+    for e in entry.get("extracts") or []:
+        if "code" in e:
+            codes.setdefault(e["name"], e["code"])
+    for e in entry.get("extracts") or []:
+        if e.get("name") in codes:
+            e["code"] = codes[e["name"]]
+
+
 def collect_points(scene: dict):
     """シーンから (x, y, z) を全部集める。outline は 1 頂点ずつ別の点として扱う。"""
     out = []
@@ -1312,12 +1424,12 @@ def build():
             m["raidDuration"] = scene.get("raidDuration")
             m["coordinateToCardinalRotation"] = scene.get("coordinateToCardinalRotation")
             m["raidDuration"] = scene.get("raidDuration")
+            m["switches"] = scene.get("switches") or []
             m["extracts"] = [
                 {
                     "name": e.get("name"),
-                    # スイッチを入れないと使えない脱出口。無条件のものと
-                    # 同じ見た目で並ぶと、最寄り脱出口の案内として危険
-                    **({"sw": e["switch"]} if e.get("switch") else {}),
+                    # スイッチが要るかどうかは、上流の e["switch"] ではなく
+                    # EXTRACT_SWITCHES で決める（annotate_extracts を参照）
                     # 内部キーも残す。校正ツールの参照 ID に使うため、
                     # 表示名が変わっても対応点が迷子にならない。
                     "key": e.get("id") or e.get("name"),
@@ -1457,6 +1569,7 @@ def build():
                 ],
             },
         }
+        annotate_extracts(entry, m.get("switches") or [], td)
         maps_out.append(entry)
 
     DATA.mkdir(parents=True, exist_ok=True)

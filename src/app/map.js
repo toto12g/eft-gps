@@ -24,6 +24,22 @@ export const FACTION_LABEL = { pmc: 'PMC', scav: 'スカブ', shared: '共通' }
 /** 色だけだと、暗い地図の上の小さな点は色覚特性によっては判別できない。形も変える。 */
 export const FACTION_SHAPE = { pmc: 'circle', scav: 'triangle', shared: 'square' };
 
+/** 脱出口の記号とスイッチの番号。1 つだけなら「A」、複数なら入れる順に「A1」「A2」。 */
+export function switchTag(code, index, count) {
+  return count > 1 ? `${code}${index + 1}` : code;
+}
+
+/** スイッチの名前から、何をするものかを短く出す。 */
+export function switchKind(name) {
+  const n = String(name || '');
+  if (/power/i.test(n)) return '電源';
+  if (/unlock/i.test(n)) return '解錠スイッチ';
+  if (/pump/i.test(n)) return '排水ポンプ';
+  if (/call/i.test(n)) return '呼び出しボタン';
+  if (/door/i.test(n)) return '扉のスイッチ';
+  return 'スイッチ';
+}
+
 /** SVG のピクセル座標をそのまま CRS 単位として使う。 */
 export function makeCRS(L) {
   return L.extend({}, L.CRS.Simple, {
@@ -228,6 +244,12 @@ export class MapView {
     const aff = this.mapData.affine;
     this.extractLayer = L.layerGroup().addTo(this.map);
 
+    // 階は、地上以外の脱出口があるマップでだけ添える。全部 1F のマップで
+    // 「(1F)」を並べても読む手間が増えるだけ
+    const showFloor = (this.mapData.extracts || []).some((e) => e.fl && e.fl !== '1F');
+    // PMC 用とスカブ用で同じ脱出口が 2 件あることがある。スイッチは 1 回だけ描く
+    const switchesDrawn = new Set();
+
     for (const e of this.mapData.extracts || []) {
       const faction = e.faction || 'shared';
       if (!this.factions.has(faction)) continue;
@@ -241,12 +263,17 @@ export class MapView {
       }
       if (!e.position) continue;
 
-      const label = String(e.name || '').replace(/^EXFIL[_ ]?/i, '');
+      const floor = showFloor && e.fl ? `（${e.fl}）` : '';
+      const label = String(e.name || '').replace(/^EXFIL[_ ]?/i, '') + floor;
+      const sw = Array.isArray(e.sw) ? e.sw : [];
+      const tags = sw.map((_, i) => switchTag(e.code, i, sw.length));
       const marker = L.marker(worldToLatLng(aff, e.position.x, e.position.z), {
         icon: L.divIcon({
-          className: 'extract-icon',
+          className: 'extract-icon' + (e.code ? ' has-code' : ''),
           html:
             `<span class="dot ex-${FACTION_SHAPE[faction] || 'circle'}" style="--c:${color}"></span>` +
+            // 記号は印の中に置く。電源の印にも同じ記号を付けて対応させる
+            (e.code ? `<span class="code" style="--c:${color}">${escapeHtml(e.code)}</span>` : '') +
             (e.sw ? `<span class="sw" title="スイッチが要る">⚡</span>` : '') +
             `<span class="label" style="--c:${color}">${escapeHtml(label)}</span>`,
           iconSize: [0, 0],
@@ -254,10 +281,37 @@ export class MapView {
         interactive: true,
       }).addTo(this.extractLayer);
       marker.bindTooltip(
-        `${escapeHtml(e.name || '')}<br>${FACTION_LABEL[faction] || faction}` +
-          (e.sw ? '<br><b>スイッチを入れないと使えない</b>' : '') + '<br>' +
+        `${escapeHtml(e.name || '')}${floor}<br>${FACTION_LABEL[faction] || faction}` +
+          (e.sw
+            ? '<br><b>スイッチを入れないと使えない</b>' +
+              sw.map((s, i) => `<br>⚡ ${tags[i]} ${escapeHtml(switchKind(s.n))}` +
+                (s.fl ? `（${s.fl}）` : '') + ` — ${escapeHtml(s.n)}`).join('')
+            : '') + '<br>' +
           `x ${e.position.x.toFixed(1)} / y ${e.position.y.toFixed(1)} / z ${e.position.z.toFixed(1)}`,
       );
+
+      // その脱出口に要る電源・スイッチ。脱出口と同じ記号で結ぶ
+      sw.forEach((s, i) => {
+        const id = `${e.code}|${s.n}`;
+        if (switchesDrawn.has(id)) return;
+        switchesDrawn.add(id);
+        const text = `${tags[i]} ${switchKind(s.n)}${s.fl ? `（${s.fl}）` : ''}`;
+        const m = L.marker(worldToLatLng(aff, s.p[0], s.p[2]), {
+          icon: L.divIcon({
+            className: 'switch-icon',
+            html:
+              `<span class="mark">${escapeHtml(tags[i])}</span>` +
+              `<span class="label">⚡ ${escapeHtml(text.slice(tags[i].length + 1))}</span>`,
+            iconSize: [0, 0],
+          }),
+          zIndexOffset: 400,
+        }).addTo(this.extractLayer);
+        m.bindTooltip(
+          `⚡ ${escapeHtml(text)}<br>${escapeHtml(s.n)}<br>` +
+            `「${escapeHtml(e.name || '')}」${floor} から脱出するのに要る` +
+            (sw.length > 1 ? `（${i + 1} / ${sw.length} 番目に入れる）` : ''),
+        );
+      });
     }
   }
 
