@@ -168,6 +168,7 @@ async function boot() {
   });
   $('floor-select').addEventListener('change', (ev) => {
     state.view.setFloor(ev.target.value || null);
+    syncDockMap();
     state.wantFloor = ev.target.value || null;
     try {
       if (state.wantFloor) localStorage.setItem('eft-gps.floor', state.wantFloor);
@@ -208,7 +209,8 @@ async function boot() {
   setupWatcher();
   setupGuide();
   setupPins();
-  setupSidebar();
+  setupDrawer();
+  setupDock();
   setupSections();
   setupExport();
   setupKeys();
@@ -300,6 +302,7 @@ function syncFloor(sample) {
   if (sel.value !== value) {
     sel.value = value;
     state.view.setFloor(value || null);
+    syncDockMap();
   }
 }
 
@@ -642,6 +645,7 @@ function selectTask(id) {
   if (state.hideDone) renderTaskOptions();
   $('task-select').value = id || '';
   syncTaskDoneButton();
+  $('dock-task-title').textContent = state.activeTask ? taskLabel(state.activeTask) : 'タスク未選択';
   const wiki = $('task-wiki');
   wiki.hidden = !(state.activeTask && state.activeTask.w);
   if (!wiki.hidden) wiki.href = state.activeTask.w;
@@ -744,7 +748,10 @@ function renderLoadout(doors) {
 function renderObjectives() {
   const box = $('task-objectives');
   box.innerHTML = '';
-  if (!state.activeTask) return;
+  if (!state.activeTask) {
+    box.innerHTML = '<div class="hint-line">「タスクを選ぶ」から選ぶと、目標と距離がここに並びます。</div>';
+    return;
+  }
 
   // Wiki で補ったタスクも、座標を持たずマップ名だけを持つ点はストーリーと同じ
   if (state.activeTask.story || state.activeTask.wk) {
@@ -922,13 +929,8 @@ function compassText(worldDeg, digits = 0) {
   return `${c.toFixed(digits)}° ${CARDINALS[Math.round(c / 45) % 8]}`;
 }
 
-/* ------------------------------------------------- サイドバーの折りたたみ */
+/* ------------------------------------------------- 引き出し・ドック・マップの帯 */
 
-/**
- * 幅 340px を固定で取っていたので、ノート PC では地図が狭かった。
- * 畳んだ状態は覚えておく。Leaflet は自分でサイズ変化に気づけないので、
- * 切り替えのたびに invalidateSize を呼ぶ。
- */
 /**
  * 折りたためる欄（details）の開閉を覚える。
  * 畳んだ欄の見出しには、中の状態（フォルダの接続など）を写して出す。
@@ -959,23 +961,126 @@ function setupSections() {
   }
 }
 
-function setupSidebar() {
-  const btn = $('btn-side');
-  const show = $('btn-side-show');
+/**
+ * 右から出る引き出し。タスクの選択と、表示・設定のどちらか一方を出す。
+ * 地図に重ねて出すので、地図の大きさは変わらない。
+ */
+function setupDrawer() {
+  const drawer = $('drawer');
+  const buttons = { tasks: $('btn-open-tasks'), settings: $('btn-open-settings') };
+  const titles = { tasks: 'タスク', settings: '表示と設定' };
+  let current = null;
+
+  const show = (panel) => {
+    current = panel;
+    drawer.hidden = !panel;
+    for (const sec of drawer.querySelectorAll('.drawer-panel')) sec.hidden = sec.dataset.panel !== panel;
+    for (const [k, b] of Object.entries(buttons)) b.setAttribute('aria-expanded', String(k === panel));
+    if (panel) $('drawer-title').textContent = titles[panel];
+  };
+  const toggle = (panel) => show(current === panel ? null : panel);
+
+  buttons.tasks.addEventListener('click', () => toggle('tasks'));
+  buttons.settings.addEventListener('click', () => toggle('settings'));
+  $('btn-task-pick').addEventListener('click', () => {
+    show('tasks');
+    $('task-filter').focus();
+  });
+  $('btn-drawer-close').addEventListener('click', () => show(null));
+  document.addEventListener('keydown', (ev) => {
+    // セットアップ手順が開いているときは、そちらの Esc を優先する
+    if (ev.key === 'Escape' && current && $('setup').hidden) show(null);
+  });
+}
+
+/**
+ * 下のドックを畳めるようにする。ノート PC では地図が狭くなるので、
+ * 畳んだ状態は覚えておく。Leaflet は自分でサイズ変化に気づけないので、
+ * 切り替えのたびに invalidateSize を呼ぶ。
+ */
+function setupDock() {
+  const btn = $('btn-dock');
   const apply = (collapsed) => {
-    document.body.classList.toggle('side-collapsed', collapsed);
+    document.body.classList.toggle('dock-collapsed', collapsed);
     btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.textContent = collapsed ? '▴' : '▾';
+    btn.title = collapsed ? '下の帯を出す' : '下の帯を畳む（地図を広く使う）';
     try {
-      localStorage.setItem('eft-gps.sideCollapsed', collapsed ? '1' : '0');
+      localStorage.setItem('eft-gps.dockCollapsed', collapsed ? '1' : '0');
     } catch { /* 保存できなくても動作には影響しない */ }
-    // 折り返しのアニメーションは無いので、次のフレームで足りる
     requestAnimationFrame(() => state.view.map.invalidateSize());
   };
-  btn.addEventListener('click', () => apply(true));
-  show.addEventListener('click', () => apply(false));
+  btn.addEventListener('click', () => apply(!document.body.classList.contains('dock-collapsed')));
   let saved = '0';
-  try { saved = localStorage.getItem('eft-gps.sideCollapsed') || '0'; } catch { /* 既定は開いた状態 */ }
+  try { saved = localStorage.getItem('eft-gps.dockCollapsed') || '0'; } catch { /* 既定は出した状態 */ }
   if (saved === '1') apply(true);
+}
+
+/** 上の帯のマップのボタンに出す数。全マップは右のプルダウンから選べる */
+const MAP_TABS = 5;
+const DEFAULT_TABS = ['customs', 'woods', 'shoreline', 'reserve', 'interchange'];
+
+/**
+ * 上の帯のマップのボタン。最近使ったマップを並べる。
+ * 13 マップ全部を並べると帯に収まらないので、使う順に 5 つだけにする。
+ */
+function renderMapTabs() {
+  const box = $('map-tabs');
+  const recent = safeParse('eft-gps.recentMaps', DEFAULT_TABS)
+    .filter((k) => state.db.byKey.has(k) && k !== state.selectedKey);
+  const keys = [state.selectedKey, ...recent].slice(0, MAP_TABS);
+  try {
+    localStorage.setItem('eft-gps.recentMaps', JSON.stringify(keys));
+  } catch { /* 保存できなくても動作には影響しない */ }
+  // 並びは前回のまま保つ。押したボタンが左端へ飛ぶと、続けて押し間違える
+  const shown = [...box.querySelectorAll('button')].map((b) => b.dataset.key).filter((k) => keys.includes(k));
+  const order = [...shown, ...keys.filter((k) => !shown.includes(k))].slice(0, MAP_TABS);
+  box.innerHTML = '';
+  for (const key of order) {
+    const m = state.db.byKey.get(key);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.key = key;
+    btn.textContent = m.name && !/^[0-9a-f]{24} /.test(m.name) ? m.name : key;
+    btn.setAttribute('aria-pressed', String(key === state.selectedKey));
+    btn.addEventListener('click', () => {
+      if (key !== state.selectedKey) selectMap(key, { byUser: true });
+    });
+    box.appendChild(btn);
+  }
+}
+
+/** ドックの「現在地」に、いま開いているマップと階を出す。 */
+function syncDockMap() {
+  const m = state.db.byKey.get(state.selectedKey);
+  $('dock-map').textContent = m ? (m.name || m.key) : '—';
+  const sel = $('floor-select');
+  const opt = sel.options[sel.selectedIndex];
+  $('dock-floor').textContent = !sel.disabled && opt ? opt.textContent : '';
+}
+
+/** 相対方位を矢印 1 文字にする。画面の上が自分の正面。 */
+function arrowFor(rel) {
+  const arrows = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
+  return arrows[((Math.round(rel / 45) % 8) + 8) % 8];
+}
+
+/** ドックの「現在地の向き」と「いちばん近い脱出口」を出し直す。 */
+function renderDock(sample, yaw, exit) {
+  $('dock-heading').textContent = sample && yaw !== null ? `向き ${compassText(yaw)}` : '';
+  if (!exit) {
+    $('dock-exit-name').textContent = '—';
+    $('dock-exit-dist').textContent = '';
+    $('dock-exit-note').textContent = sample ? 'このマップの現在地が確定すると出ます' : '';
+    return;
+  }
+  $('dock-exit-name').textContent = exit.name;
+  $('dock-exit-dist').textContent =
+    `${exit.dist.toFixed(0)}m ${exit.relative === null ? '' : arrowFor(exit.relative)}`;
+  $('dock-exit-note').textContent =
+    `方位 ${compassText(exit.bearing)}` +
+    (exit.relative === null ? '' : `（${relativeText(exit.relative)}）`) +
+    (exit.needsSwitch ? ' · 要スイッチ' : '');
 }
 
 /* ------------------------------------------------------------------ ピン */
@@ -1475,6 +1580,9 @@ async function selectMap(key, opts = {}) {
     $('floor-lock').hidden = true;
   }
 
+  renderMapTabs();
+  syncDockMap();
+
   state.pins = loadPins(key);
   if (!state.pins.some((p) => p.id === state.activePinId)) state.activePinId = null;
   renderPins();
@@ -1494,6 +1602,7 @@ function renderSample(sample, verdict) {
     box.innerHTML = '<div class="hint">スクリーンショットを撮るか、ファイル名を貼り付けてください。</div>';
     setStatus('待機中', 'idle');
     $('btn-switch').hidden = true;
+    renderDock(null, null, null);
     return;
   }
 
@@ -1556,6 +1665,7 @@ function renderSample(sample, verdict) {
   box.innerHTML = rows
     .map(([k, v]) => `<div class="row"><span class="k">${k}</span><span class="v">${escapeHtml(v)}</span></div>`)
     .join('');
+  renderDock(sample, yaw, exit);
 
   if (verdict) {
     const [text, cls] = VERDICT_TEXT[verdict.verdict] || ['?', 'off'];

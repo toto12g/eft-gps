@@ -2809,19 +2809,24 @@ await check('和訳の「渡す」と「手に入れる」の入れ替わりを�
   return t.o.filter((o) => (o.d || '').includes('ライ麦クルトン')).map((o) => o.d).join(' / ');
 });
 
-await check('サイドバーの折りたたみ欄がそろっている', async () => {
+await check('画面の組み立て（上の帯・地図・ドック・引き出し）がそろっている', async () => {
   const html = await fetch('../index.html').then((r) => r.text());
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const secs = [...doc.querySelectorAll('details.sec')].map((d) => d.dataset.sec);
+  for (const id of ['topbar', 'map-tabs', 'map', 'dock', 'drawer', 'task-objectives', 'dock-exit-name']) {
+    truthy(doc.getElementById(id), `#${id} が無い`);
+  }
+  // レイド中に見るもの（現在地・タスクの目標・最寄りの脱出口）はドックに置く
+  const dock = doc.getElementById('dock');
+  for (const id of ['status', 'sample-age', 'task-objectives', 'dock-exit-dist']) {
+    truthy(dock.querySelector(`#${id}`), `#${id} がドックに無い`);
+  }
+  const secs = [...doc.querySelectorAll('#drawer details.sec')].map((d) => d.dataset.sec);
   for (const k of ['layers', 'pins', 'keys', 'items', 'watch', 'input']) {
     truthy(secs.includes(k), `折りたたみ欄 ${k} が無い`);
   }
-  // タスク欄は折りたたまず、地図に出すものより上
-  const side = [...doc.querySelector('#side').children];
-  const taskAt = side.findIndex((el) => el.querySelector('#task-select'));
-  const layerAt = side.findIndex((el) => el.dataset && el.dataset.sec === 'layers');
-  truthy(taskAt >= 0 && taskAt < layerAt, 'タスク欄が地図に出すものより下にある');
-  truthy(doc.querySelector('.legend'), '一覧の記号の凡例が無い');
+  truthy(doc.querySelector('#drawer .legend'), '一覧の記号の凡例が無い');
+  // 非公式ツールの表示は常に見える場所に置く（引き出しの中に隠さない）
+  truthy(dock.querySelector('.dock-legal'), '非公式ツールの表示がドックに無い');
   return secs.join(' / ');
 });
 

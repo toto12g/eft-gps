@@ -11,24 +11,22 @@
 <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
 <style>
 :root {
-  --bg: #0e1112; --panel: #16191b; --panel-2: #1c2123; --rule: #2a3133;
-  --ink: #dce1df; --ink-2: #aab3b1; --muted: #8b9694;
-  --accent: #c79a4e; --ok: #7fa877; --warn: #c9776c; --info: #7fa6c4;
-  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-  --sans: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+  --bg: #0f0f10; --panel: #181716; --panel-2: #201f1d; --panel-3: #2a2826; --rule: #2e2b28;
+  --ink: #f1ede8; --ink-2: #d2cbc3; --muted: #a8a199;
+  --accent: #ff8a3d; --accent-2: #ffa060; --on-accent: #1a0e05;
+  --ok: #8fe0a2; --warn: #ff8f7a; --info: #8fbde0;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --sans: "M PLUS 1p", "BIZ UDPGothic", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--ink);
   font: 13px/1.7 var(--sans); display: grid;
-  grid-template-columns: 360px 1fr; overflow: hidden;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
-/* ------------------------------------------------------------- sidebar */
-#side { background: var(--panel); border-right: 1px solid var(--rule);
-        display: flex; flex-direction: column; overflow-y: auto; }
-#side > * { padding: 12px 14px; border-bottom: 1px solid var(--rule); }
 h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 h1 small { display: block; font: 400 10px/1.5 var(--mono); color: var(--muted);
            letter-spacing: .08em; text-transform: uppercase; margin-top: 3px; }
@@ -62,8 +60,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 #sample .v { font: 13px/1.6 var(--mono); word-break: break-all; }
 #sample .hint { color: var(--muted); font-size: 13px; }
 
-#clock { display: flex; justify-content: space-between; align-items: baseline; }
-#world-clock { font: 600 13px/1 var(--mono); color: var(--accent); }
+#world-clock { font: 600 14px/1 var(--mono); color: var(--ink-2); white-space: nowrap; }
 
 .safety { font-size: 12px; color: var(--muted); line-height: 1.7; }
 .safety b { color: var(--ink-2); font-weight: 600; }
@@ -79,7 +76,6 @@ label.check { display: flex; gap: 7px; align-items: flex-start; margin-top: 8px;
               font: 400 12px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
               color: var(--ink-2); cursor: pointer; }
 label.check input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
-#side > .grow { flex: 1; border-bottom: 0; }
 
 /* 折りたためる欄。見出しを押すと開閉し、状態は localStorage に残す */
 details.sec > summary, details.about > summary {
@@ -101,7 +97,6 @@ details.sec[hidden] { display: none; }
 details[open] > summary .sum-note { display: none; }
 details.about { margin-top: 6px; }
 details.about[open] > summary { margin-bottom: 4px; }
-#clock { margin-top: 8px; }
 /* プルダウンの記号の意味 */
 .sum-note.ok { color: var(--ok); }
 .sum-note.warn { color: var(--warn); }
@@ -111,7 +106,7 @@ details.about[open] > summary { margin-bottom: 4px; }
 .legend span { white-space: nowrap; }
 
 /* ----------------------------------------------------------------- map */
-#map { height: 100vh; background: #0a0c0d; }
+#map { position: absolute; inset: 0; background: #0a0c0d; }
 .leaflet-container { background: #0a0c0d; font-family: var(--mono); }
 .leaflet-control-attribution { background: rgba(14,17,18,.8); color: var(--muted); font-size: 10px; }
 .leaflet-control-attribution a { color: var(--muted); }
@@ -202,24 +197,81 @@ details.about[open] > summary { margin-bottom: 4px; }
 /* 色は JS 側 (SIDE_COLOR) が点ごとに決める。インラインの --c のほうが
    強いので、ここで色を書いても効かない。大きさだけを扱う */
 
-/* サイドバーの折りたたみ。狭い画面では地図がほとんど残らない */
-body.side-collapsed { grid-template-columns: 0 1fr; }
-body.side-collapsed #side { display: none; }
-#side > div:first-child { display: flex; align-items: flex-start; gap: 8px; }
-#side > div:first-child h1 { flex: 1 1 auto; min-width: 0; }
-#btn-side {
-  /* 汎用の button は width:100% なので、ここで打ち消さないと見出しを潰す */
-  flex: 0 0 auto; width: auto; align-self: center;
-  padding: 2px 8px; font: 600 14px/1.2 var(--mono); background: transparent;
-  border: 1px solid var(--rule); border-radius: 4px; color: var(--muted); cursor: pointer;
+/* ------------------------------------------------- 上の帯・地図・ドック */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                   clip: rect(0 0 0 0); white-space: nowrap; }
+.grow { flex: 1; }
+#topbar { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px;
+          background: var(--panel); border-bottom: 1px solid var(--rule); min-width: 0; }
+#topbar .brand { font: 800 15px/1 var(--sans); letter-spacing: .04em; white-space: nowrap; }
+#map-tabs { display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--panel-2);
+            overflow-x: auto; min-width: 0; }
+#map-tabs button { width: auto; flex: none; border: 0; border-radius: 7px; background: transparent;
+                   color: var(--muted); padding: 6px 12px; font: 500 13px/1.4 var(--sans); }
+#map-tabs button:hover { color: var(--ink); }
+#map-tabs button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.top-select { margin: 0; flex: none; }
+.top-select select { width: auto; max-width: 190px; border-radius: 8px; padding: 6px 8px;
+                     font: 500 13px/1.4 var(--sans); }
+.top-btn { width: auto; flex: none; border-radius: 8px; padding: 7px 14px; background: transparent;
+           font: 600 13px/1.4 var(--sans); }
+.top-btn.icon { display: flex; align-items: center; padding: 7px 9px; }
+.top-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+
+#map-area { position: relative; min-height: 0; overflow: hidden; }
+#map-missing { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 500;
+               margin: 0; background: var(--panel); border: 1px solid var(--warn); border-radius: 8px;
+               padding: 6px 12px; }
+/* 右下は方位マークが使うので左下に置く */
+#btn-dock { position: absolute; left: 12px; bottom: 12px; z-index: 600; width: 38px; height: 38px;
+            padding: 0; border-radius: 10px; background: var(--panel); font-size: 16px; }
+body.dock-collapsed #dock { display: none; }
+
+/* 引き出し。地図に重ねて右から出す（地図の大きさは変えない） */
+/* Leaflet の操作部品（方位マークなど, z-index 800〜1000）より前に出す */
+#drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 1100; width: 400px; max-width: 100%;
+          overflow-y: auto; padding: 16px 18px 24px; background: var(--panel);
+          border-left: 1px solid var(--rule); box-shadow: -10px 0 28px rgba(0,0,0,.45); }
+.drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.drawer-head h2 { margin: 0; font: 700 18px/1.3 var(--sans); }
+#btn-drawer-close { width: 38px; height: 38px; padding: 0; border-radius: 10px; font-size: 18px; }
+.drawer-panel details { border-top: 1px solid var(--rule); padding: 12px 0; }
+.drawer-panel details:first-child { border-top: 0; padding-top: 0; }
+
+/* 下のドック。レイド中にちらっと見るものだけを大きく出す */
+#dock { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 16px;
+        padding: 14px 20px 8px; background: var(--panel); border-top: 1px solid var(--rule); }
+#dock .card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px;
+              border-radius: 14px; background: var(--panel-2); }
+.card-k { font: 500 12px/1.4 var(--sans); color: var(--muted); }
+.dock-map { font: 800 24px/1.2 var(--sans); }
+.dock-floor { font: 500 15px/1 var(--sans); color: var(--muted); }
+.dock-mono { font: 500 13px/1.4 var(--mono); color: var(--muted); }
+#dock .status { font-size: 12px; padding: 6px 8px; }
+#dock .age { margin-top: 0; }
+#btn-switch { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 700; }
+.dock-task-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.dock-task-title { font: 700 16px/1.4 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-exit-name { font: 700 20px/1.3 var(--sans); overflow-wrap: anywhere; }
+.dock-exit-dist { font: 700 30px/1.1 var(--mono); color: var(--accent-2); }
+.dock-legal { grid-column: 1 / -1; margin: 0; text-align: center; font-size: 11px; color: var(--muted); }
+.dock-legal b { color: var(--ink-2); }
+
+/* ドックのタスク目標は横に並べたカード。距離を上に大きく出す */
+#dock #task-objectives .obj-row {
+  flex: 0 0 220px; grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: "m m" "n d";
+  align-content: start; row-gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--panel-3);
 }
-#btn-side:hover { color: var(--ink); border-color: var(--muted); }
-#btn-side-show {
-  width: auto; position: absolute; left: 8px; top: 8px; z-index: 500; display: none;
-  background: var(--panel); padding: 4px 9px; border: 1px solid var(--rule);
-  border-radius: 4px; color: var(--muted); cursor: pointer; font: 600 14px/1.2 var(--mono);
-}
-body.side-collapsed #btn-side-show { display: block; }
+#dock #task-objectives .obj-row .m { grid-area: m; white-space: normal; font: 700 17px/1.3 var(--mono);
+                                    color: var(--accent-2); }
+#dock #task-objectives .obj-row.away .m { color: var(--muted); font-size: 13px; }
+#dock #task-objectives .obj-row .n { grid-area: n; }
+#dock #task-objectives .obj-row .d { grid-area: d; }
+#dock #task-objectives .obj-row.story { padding-left: 12px; }
+#dock #task-objectives .obj-branch { flex: 0 0 160px; align-self: stretch; margin: 0; border: 0;
+                                    border-left: 2px solid var(--accent); padding: 8px 10px; }
+#dock #task-objectives .story-filter { flex: none; align-self: center; margin: 0; max-width: 150px; }
+#dock #task-objectives > .hint-line { margin: 0; }
 
 /* 更新の通知 */
 #update-bar {
@@ -416,7 +468,8 @@ body.side-collapsed #btn-side-show { display: block; }
                     font: 600 11px/1.4 var(--mono); color: #c4cedb;
                     text-shadow: 0 0 4px #0a0c0d, 0 0 4px #0a0c0d, 0 0 4px #0a0c0d; }
 
-#task-objectives { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; }
+#task-objectives { margin-top: 6px; display: flex; flex-direction: row; gap: 10px;
+                   overflow-x: auto; padding-bottom: 4px; min-height: 0; }
 .obj-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: baseline;
            padding: 5px 6px; background: var(--panel-2); border-radius: 2px; cursor: pointer;
            text-align: left; border: 0; width: 100%; }
@@ -465,9 +518,10 @@ body.side-collapsed #btn-side-show { display: block; }
   background: var(--panel); border: 1px solid var(--accent); border-radius: 2px; color: var(--ink);
 }
 
-@media (max-width: 780px) {
-  body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; }
-  #map { height: 60vh; }
+@media (max-width: 900px) {
+  body { overflow: auto; grid-template-rows: auto 60vh auto; }
+  #topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; }
+  #dock { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ------------------------------------------------------- はじめての設定 */
@@ -603,194 +657,221 @@ body.side-collapsed #btn-side-show { display: block; }
   新しい版が届いています。<button type="button" id="btn-reload">再読み込み</button>
 </div>
 
-<div id="side">
+<!-- 画面は 3 段: 上の帯（マップの切り替え）/ 地図 / 下のドック（現在地・タスク・最寄りの脱出口）。
+     レイド中にちらっと見るものだけをドックに置き、それ以外は右から出る引き出しにまとめる -->
+<header id="topbar">
+  <span class="brand">EFT GPS</span>
+  <nav id="map-tabs" aria-label="よく使うマップ"></nav>
+  <label class="top-select" title="すべてのマップ">
+    <span class="visually-hidden">マップ</span>
+    <select id="map-select"></select>
+  </label>
+  <label class="top-select" title="フロア">
+    <span class="visually-hidden">フロア</span>
+    <select id="floor-select" disabled></select>
+  </label>
+  <span class="grow"></span>
+  <span id="world-clock" title="ワールド時計">--:-- / --:--</span>
+  <button type="button" id="btn-open-tasks" class="top-btn" aria-expanded="false" aria-controls="drawer">タスク</button>
+  <button type="button" id="btn-open-settings" class="top-btn icon" aria-expanded="false" aria-controls="drawer" aria-label="表示と設定">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>
+  </button>
+</header>
 
-  <div>
-    <h1>EFT 測位クライアント<small>screenshot filename → position</small></h1>
-    <button type="button" id="btn-side" title="サイドバーを畳む（地図を広く使う）"
-            aria-expanded="true">‹</button>
-  </div>
+<div id="map-area">
+  <div id="map"></div>
+  <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
+  <button type="button" id="btn-dock" aria-expanded="true" title="下の帯を畳む（地図を広く使う）">▾</button>
 
-  <!-- レイド中に見るものを上に置く: マップ → 現在地の状態 → タスク。
-       それ以外（表示の切替・鍵・アイテム・設定）は下にまとめて折りたためるようにする -->
-  <div>
-    <div class="field">
-      <label for="map-select">マップ（手動選択）</label>
-      <select id="map-select"></select>
+  <!-- 引き出し。タスクと、表示・設定のどちらか一方を出す -->
+  <aside id="drawer" hidden>
+    <div class="drawer-head">
+      <h2 id="drawer-title">タスク</h2>
+      <button type="button" id="btn-drawer-close" aria-label="閉じる">×</button>
     </div>
-    <div class="field">
-      <label for="floor-select">フロア</label>
-      <select id="floor-select" disabled></select>
-      <label class="check" id="floor-lock" hidden>
-        <input type="checkbox" id="floor-lock-input">
-        <span>フロアを固定する（自動で切り替えない）</span>
+
+    <section class="drawer-panel" data-panel="tasks">
+      <label for="task-filter">タスクを探す</label>
+      <input type="search" id="task-filter"
+             placeholder="タスク名・トレーダー・マップ名（インターチェンジ など）"
+             autocomplete="off">
+      <div id="task-hits" hidden></div>
+      <label class="check" id="task-hide-wrap" style="margin-top:6px">
+        <input type="checkbox" id="task-hide-done"><span>終わったタスクを隠す</span>
       </label>
-    </div>
-    <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
-  </div>
-
-  <div>
-    <div id="status" class="status idle">待機中</div>
-    <div id="sample-age" class="age"></div>
-    <div id="clock">
-      <label style="margin:0">ワールド時計</label>
-      <span id="world-clock">--:-- / --:--</span>
-    </div>
-  </div>
-
-  <div id="sample"><div class="hint">ゲーム内でスクリーンショットを撮ると、ここに現在地が出ます。</div></div>
-
-  <div>
-    <label for="task-select">タスクの目標地点</label>
-    <input type="search" id="task-filter"
-           placeholder="タスク名・トレーダー・マップ名で検索（インターチェンジ など）"
-           autocomplete="off">
-    <div id="task-hits" hidden></div>
-    <label class="check" id="task-hide-wrap" style="margin-top:6px">
-      <input type="checkbox" id="task-hide-done"><span>終わったタスクを隠す</span>
-    </label>
-    <select id="task-select" style="margin-top:8px"></select>
-    <div class="legend"><span>◎ このマップに地点あり</span><span>✓ 終わった</span><span>★ Kappa 必須</span><span>〈任意〉マップを問わない</span><span>※Wiki 地点データなし</span></div>
-    <div class="btn-row">
-      <button type="button" id="btn-task-done" hidden>終わった</button>
-      <button type="button" id="btn-task-clear">解除</button>
-      <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
-    </div>
-    <div id="task-loadout"></div>
-    <div id="task-objectives"></div>
-  </div>
-
-  <details class="sec" data-sec="layers" open>
-    <summary>地図に出すもの</summary>
-    <div class="field">
-      <label>脱出口の表示</label>
-      <div id="faction-filter" class="chips">
-        <label class="chip" data-f="pmc"><input type="checkbox" value="pmc" checked><span>PMC</span></label>
-        <label class="chip" data-f="scav"><input type="checkbox" value="scav" checked><span>スカブ</span></label>
-        <label class="chip" data-f="shared"><input type="checkbox" value="shared" checked><span>共通</span></label>
-      </div>
-    </div>
-    <div class="field">
-      <label>地点</label>
-      <div id="layer-filter" class="chips wrap"></div>
-      <div id="layer-hint" class="hint-line"></div>
-    </div>
-    <div id="map-info" style="margin-top:8px"></div>
-  </details>
-
-  <details class="sec" data-sec="pins" open>
-    <summary>ピンと距離</summary>
-    <div class="pin-tools">
-      <button type="button" id="btn-place" class="pin-toggle" aria-pressed="false"
-              title="オンにすると、地図をクリックするたびにピンが刺さります">
-        <span class="glyph" aria-hidden="true"></span>
-        <span class="txt">ピンを置く</span>
-      </button>
-      <button type="button" id="btn-pins-clear">すべて消す</button>
-    </div>
-    <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
-    <div class="pin-tools">
-      <button type="button" id="btn-measure" class="pin-toggle" aria-pressed="false"
-              title="地図を 2 回クリックすると、その 2 点間の距離が出ます">
-        <span class="glyph" aria-hidden="true"></span>
-        <span class="txt">距離を測る</span>
-      </button>
-      <output id="measure-out" class="hint-line"></output>
-    </div>
-    <div id="pins"></div>
-  </details>
-
-  <details class="sec" data-sec="keys" id="keys-field" hidden>
-    <summary>鍵と施錠扉</summary>
-    <input type="search" id="key-filter" placeholder="鍵の名前で絞り込む" autocomplete="off"
-           aria-label="鍵の名前で絞り込む">
-    <div id="key-list"></div>
-  </details>
-
-  <details class="sec" data-sec="items">
-    <summary>アイテムの用途</summary>
-    <input type="search" id="item-filter" aria-label="アイテムの用途を調べる"
-           placeholder="アイテム名を入れて Enter（電線 / wires …）" autocomplete="off">
-    <div class="btn-row" style="margin-top:5px">
-      <a class="btn-link" id="btn-items" href="./items.html" target="_blank"
-         rel="noopener">アイテム一覧を別タブで開く</a>
-    </div>
-    <div class="hint-line">画像つきの一覧は別ページです。ここで打って Enter を押すと、
-      その言葉で検索した状態で開きます。</div>
-  </details>
-
-  <details class="sec" data-sec="watch" open>
-    <summary>スクリーンショットフォルダ<span class="sum-note" data-mirror="watch-status"></span></summary>
-    <div id="watch-status" class="status idle">フォルダ未接続</div>
-    <div class="btn-row">
-      <button type="button" id="btn-pick">フォルダを選ぶ</button>
-      <button type="button" id="btn-grant" hidden>権限を許可</button>
-      <button type="button" id="btn-forget" hidden>接続を解除</button>
-    </div>
-    <div class="btn-row">
-      <button type="button" id="btn-replay" hidden>直近 20 枚を読み込む</button>
-      <button type="button" id="btn-setup">セットアップ手順</button>
-    </div>
-    <div id="watch-count" class="muted-line"></div>
-    <label class="check">
-      <input type="checkbox" id="auto-switch" checked>
-      <span>座標から確実に判別できたらマップを自動で合わせる</span>
-    </label>
-    <p class="safety" style="margin:8px 0 0">
-      既定は <code>ドキュメント\Escape from Tarkov\Screenshots</code>。OneDrive に
-      リダイレクトされている場合はそちらを選んでください。
-    </p>
-  </details>
-
-  <details class="sec" data-sec="input">
-    <summary>ファイル名・座標の手入力と記録</summary>
-    <form id="input-form">
-      <div class="field">
-        <label for="input-text">ファイル名を貼り付ける / 座標を直接入力</label>
-        <textarea id="input-text" rows="3" spellcheck="false"
-          placeholder="2026-09-03[07-31]_253.03, 4.36, 392.09_-0.02791, 0.97159, -0.18087, -0.15004_16.71 (0).png"></textarea>
-      </div>
+      <label for="task-select" style="margin-top:12px">タスクの目標地点</label>
+      <select id="task-select"></select>
+      <div class="legend"><span>◎ このマップに地点あり</span><span>✓ 終わった</span><span>★ Kappa 必須</span><span>〈任意〉マップを問わない</span><span>※Wiki 地点データなし</span></div>
       <div class="btn-row">
-        <button type="submit">現在地を出す</button>
-        <button type="button" id="btn-clear">軌跡を消す</button>
+        <button type="button" id="btn-task-done" hidden>終わった</button>
+        <button type="button" id="btn-task-clear">解除</button>
+        <a id="task-wiki" class="wiki-link" target="_blank" rel="noopener noreferrer" hidden>Wiki</a>
       </div>
-      <label class="check" style="margin-top:6px">
-        <input type="checkbox" id="trail-toggle" checked>
-        <span>通った跡の線を出す</span>
-      </label>
-      <div class="btn-row">
-        <button type="button" id="btn-switch" hidden></button>
-      </div>
-    </form>
-    <div class="pin-tools" style="margin-top:10px">
-      <button type="button" id="btn-export">レイドの記録を書き出す</button>
-    </div>
-    <div id="export-hint" class="hint-line">受け取ったファイル名と判定を JSON で保存します。不具合の報告に添えてください。</div>
-  </details>
+      <div id="task-loadout"></div>
+    </section>
 
-  <div class="grow">
-    <p class="safety">
-      非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
-      地図素材のライセンス上、<b>ゲーム画面に重ねての使用は禁止</b>されています。
-    </p>
-    <details class="about" data-sec="about">
-      <summary>このアプリについて・出典</summary>
-      <p class="safety">
-        このアプリは<b>スクリーンショットのファイル名だけ</b>を読みます。画像の中身は開かず、
-        ゲームフォルダにもアクセスせず、座標を外部に送信しません。すべてブラウザ内で完結します。
-      </p>
-      <p class="safety" id="attrib"></p>
-      <p class="safety" id="build-stamp"></p>
-      <p class="safety">
-        メインストーリーの目標文: <a class="plain-link" href="https://escapefromtarkov.fandom.com/wiki/Story_chapters"
-        target="_blank" rel="noopener noreferrer">Escape from Tarkov Wiki</a>（Fandom, CC BY-SA 3.0）
-      </p>
-    </details>
-  </div>
+    <section class="drawer-panel" data-panel="settings" hidden>
+      <details class="sec" data-sec="detail">
+        <summary>現在地の詳細</summary>
+        <div id="sample"><div class="hint">ゲーム内でスクリーンショットを撮ると、ここに現在地が出ます。</div></div>
+      </details>
+
+      <details class="sec" data-sec="layers" open>
+        <summary>地図に出すもの</summary>
+        <div class="field">
+          <label>脱出口の表示</label>
+          <div id="faction-filter" class="chips">
+            <label class="chip" data-f="pmc"><input type="checkbox" value="pmc" checked><span>PMC</span></label>
+            <label class="chip" data-f="scav"><input type="checkbox" value="scav" checked><span>スカブ</span></label>
+            <label class="chip" data-f="shared"><input type="checkbox" value="shared" checked><span>共通</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <label>地点</label>
+          <div id="layer-filter" class="chips wrap"></div>
+          <div id="layer-hint" class="hint-line"></div>
+        </div>
+        <label class="check" id="floor-lock" hidden>
+          <input type="checkbox" id="floor-lock-input">
+          <span>フロアを固定する（自動で切り替えない）</span>
+        </label>
+        <div id="map-info" style="margin-top:8px"></div>
+      </details>
+
+      <details class="sec" data-sec="pins" open>
+        <summary>ピンと距離</summary>
+        <div class="pin-tools">
+          <button type="button" id="btn-place" class="pin-toggle" aria-pressed="false"
+                  title="オンにすると、地図をクリックするたびにピンが刺さります">
+            <span class="glyph" aria-hidden="true"></span>
+            <span class="txt">ピンを置く</span>
+          </button>
+          <button type="button" id="btn-pins-clear">すべて消す</button>
+        </div>
+        <div id="pin-hint" class="hint-line">ピンを置くを押してから地図をクリックします。</div>
+        <div class="pin-tools">
+          <button type="button" id="btn-measure" class="pin-toggle" aria-pressed="false"
+                  title="地図を 2 回クリックすると、その 2 点間の距離が出ます">
+            <span class="glyph" aria-hidden="true"></span>
+            <span class="txt">距離を測る</span>
+          </button>
+          <output id="measure-out" class="hint-line"></output>
+        </div>
+        <div id="pins"></div>
+      </details>
+
+      <details class="sec" data-sec="keys" id="keys-field" hidden>
+        <summary>鍵と施錠扉</summary>
+        <input type="search" id="key-filter" placeholder="鍵の名前で絞り込む" autocomplete="off"
+               aria-label="鍵の名前で絞り込む">
+        <div id="key-list"></div>
+      </details>
+
+      <details class="sec" data-sec="items">
+        <summary>アイテムの用途</summary>
+        <input type="search" id="item-filter" aria-label="アイテムの用途を調べる"
+               placeholder="アイテム名を入れて Enter（電線 / wires …）" autocomplete="off">
+        <div class="btn-row" style="margin-top:5px">
+          <a class="btn-link" id="btn-items" href="./items.html" target="_blank"
+             rel="noopener">アイテム一覧を別タブで開く</a>
+        </div>
+        <div class="hint-line">画像つきの一覧は別ページです。ここで打って Enter を押すと、
+          その言葉で検索した状態で開きます。</div>
+      </details>
+
+      <details class="sec" data-sec="watch" open>
+        <summary>スクリーンショットフォルダ<span class="sum-note" data-mirror="watch-status"></span></summary>
+        <div id="watch-status" class="status idle">フォルダ未接続</div>
+        <div class="btn-row">
+          <button type="button" id="btn-pick">フォルダを選ぶ</button>
+          <button type="button" id="btn-grant" hidden>権限を許可</button>
+          <button type="button" id="btn-forget" hidden>接続を解除</button>
+        </div>
+        <div class="btn-row">
+          <button type="button" id="btn-replay" hidden>直近 20 枚を読み込む</button>
+          <button type="button" id="btn-setup">セットアップ手順</button>
+        </div>
+        <div id="watch-count" class="muted-line"></div>
+        <label class="check">
+          <input type="checkbox" id="auto-switch" checked>
+          <span>座標から確実に判別できたらマップを自動で合わせる</span>
+        </label>
+        <p class="safety" style="margin:8px 0 0">
+          既定は <code>ドキュメント\Escape from Tarkov\Screenshots</code>。OneDrive に
+          リダイレクトされている場合はそちらを選んでください。
+        </p>
+      </details>
+
+      <details class="sec" data-sec="input">
+        <summary>ファイル名・座標の手入力と記録</summary>
+        <form id="input-form">
+          <div class="field">
+            <label for="input-text">ファイル名を貼り付ける / 座標を直接入力</label>
+            <textarea id="input-text" rows="3" spellcheck="false"
+              placeholder="2026-09-03[07-31]_253.03, 4.36, 392.09_-0.02791, 0.97159, -0.18087, -0.15004_16.71 (0).png"></textarea>
+          </div>
+          <div class="btn-row">
+            <button type="submit">現在地を出す</button>
+            <button type="button" id="btn-clear">軌跡を消す</button>
+          </div>
+          <label class="check" style="margin-top:6px">
+            <input type="checkbox" id="trail-toggle" checked>
+            <span>通った跡の線を出す</span>
+          </label>
+        </form>
+        <div class="pin-tools" style="margin-top:10px">
+          <button type="button" id="btn-export">レイドの記録を書き出す</button>
+        </div>
+        <div id="export-hint" class="hint-line">受け取ったファイル名と判定を JSON で保存します。不具合の報告に添えてください。</div>
+      </details>
+
+      <details class="about" data-sec="about">
+        <summary>このアプリについて・出典</summary>
+        <p class="safety">
+          このアプリは<b>スクリーンショットのファイル名だけ</b>を読みます。画像の中身は開かず、
+          ゲームフォルダにもアクセスせず、座標を外部に送信しません。すべてブラウザ内で完結します。
+        </p>
+        <p class="safety" id="attrib"></p>
+        <p class="safety" id="build-stamp"></p>
+        <p class="safety">
+          メインストーリーの目標文: <a class="plain-link" href="https://escapefromtarkov.fandom.com/wiki/Story_chapters"
+          target="_blank" rel="noopener noreferrer">Escape from Tarkov Wiki</a>（Fandom, CC BY-SA 3.0）
+        </p>
+      </details>
+    </section>
+  </aside>
 </div>
 
-<button type="button" id="btn-side-show" title="サイドバーを出す">›</button>
-<div id="map"></div>
+<footer id="dock">
+  <section class="card" aria-label="現在地">
+    <span class="card-k">現在地</span>
+    <span class="dock-map"><span id="dock-map">—</span> <span id="dock-floor" class="dock-floor"></span></span>
+    <div id="status" class="status idle">待機中</div>
+    <div id="sample-age" class="age"></div>
+    <span id="dock-heading" class="dock-mono"></span>
+    <button type="button" id="btn-switch" hidden></button>
+  </section>
+
+  <section class="card" aria-label="タスク">
+    <div class="dock-task-head">
+      <span id="dock-task-title" class="dock-task-title">タスク未選択</span>
+      <button type="button" id="btn-task-pick" class="top-btn">タスクを選ぶ</button>
+    </div>
+    <div id="task-objectives"><div class="hint-line">「タスクを選ぶ」から選ぶと、目標と距離がここに並びます。</div></div>
+  </section>
+
+  <section class="card" aria-label="いちばん近い脱出口">
+    <span class="card-k">いちばん近い脱出口</span>
+    <span id="dock-exit-name" class="dock-exit-name">—</span>
+    <span id="dock-exit-dist" class="dock-exit-dist"></span>
+    <span id="dock-exit-note" class="hint-line"></span>
+  </section>
+
+  <p class="dock-legal">
+    非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。
+    地図素材のライセンス上、<b>ゲーム画面に重ねての使用は禁止</b>されています。
+  </p>
+</footer>
 
 <script src="./vendor/leaflet/leaflet.js"></script>
 <script type="module" src="./src/app/main.js"></script>
