@@ -44,8 +44,9 @@ import {
   loadItems, searchItems, topItems, useKinds, hideoutTotal, useSummary,
 } from '../src/app/items.js';
 import {
-  decodeGuns, bestBuilds, buildAt, stockStats, compareRows, sourceOf, searchGuns,
-  DEFAULT_COND, ERGO_CAP,
+  decodeGuns, bestBuilds, buildAt, stockStats, compareRows, sourceOf, searchGuns, buildStats,
+  treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, encodeTree, decodeTree,
+  rawWeight, traderLL, DEFAULT_COND, ERGO_CAP,
 } from '../src/app/builds.js';
 import { parseHash, hashFor } from '../src/app/router.js';
 
@@ -3235,6 +3236,124 @@ await check('銃を名前と口径で探せる', () => {
   return `7.62x39 は ${cal.length} 丁`;
 });
 
+/* --------------------------------------------------------------------- T36 */
+
+group('T36 トレーダーごとの LL・部品代の上限・自分で組む');
+
+const m4 = gdb.bySlug.get('m4a1');
+const trIdx = (key) => gdb.traders.findIndex((t) => t.key === key);
+
+await check('トレーダーごとの LL は、そのトレーダーにだけ効く', () => {
+  const mech = trIdx('mechanic');
+  const lv = gdb.traders.map(() => 4);
+  lv[mech] = 1;
+  // フリマがあると LL に関係なく揃ってしまうので、トレーダーだけで比べる
+  const cond = { ...DEFAULT_COND, flea: false, lv };
+  eq(traderLL(cond, mech), 1, 'Mechanic の LL');
+  eq(traderLL(cond, trIdx('skier')), 4, 'ほかのトレーダーの LL');
+  const b = bestBuilds(gdb, m4, cond);
+  for (const k of KIND_KEYS) {
+    for (const p of b[k].parts) {
+      const s = p.source;
+      truthy(!(s && s.t === mech && s.ll > 1), `Mechanic LL${s && s.ll} の部品が入っている: ${p.mod.n}`);
+    }
+  }
+  // 全員 LL1 よりは良く、全員 LL4 よりは悪いか同じ
+  const all1 = bestBuilds(gdb, m4, { ...DEFAULT_COND, flea: false, ll: 1 });
+  const all4 = bestBuilds(gdb, m4, { ...DEFAULT_COND, flea: false, ll: 4 });
+  truthy(b.recoil.stats.recoil <= all1.recoil.stats.recoil + 1e-9, '全員 LL1 より悪い');
+  truthy(b.recoil.stats.recoil >= all4.recoil.stats.recoil - 1e-9, '全員 LL4 より良い');
+  truthy(all1.recoil.stats.recoil > all4.recoil.stats.recoil, 'LL で差が出ない（試し方が弱い）');
+  return `M4A1 反動最小（フリマなし）: 全員 LL4 ${all4.recoil.stats.recoil.toFixed(1)}% / Mechanic だけ LL1 ${b.recoil.stats.recoil.toFixed(1)}% / 全員 LL1 ${all1.recoil.stats.recoil.toFixed(1)}%`;
+});
+
+await check('部品代の上限に収まり、値段の分からない部品は使わない', () => {
+  const budget = 150000;
+  const notes = [];
+  for (const slug of ['m4a1', 'akm', 'mp5', 'hk-416a5']) {
+    const g = gdb.bySlug.get(slug);
+    const b = bestBuilds(gdb, g, { ...DEFAULT_COND, budget });
+    truthy(b, `${slug} が ₽${budget} で組めない`);
+    for (const k of KIND_KEYS) {
+      truthy(b[k].stats.price <= budget, `${slug}/${k} が上限を超えた: ${b[k].stats.price}`);
+      eq(b[k].stats.flea + b[k].stats.barter, 0, `${slug}/${k} にフリマか交換の部品が入っている`);
+    }
+    // 上限を付けても、上限なしより良くはならない
+    truthy(b.recoil.stats.recoil >= allBuilds.get(slug).recoil.stats.recoil - 1e-9, `${slug} が上限なしより良い`);
+    notes.push(`${slug} ₽${b.recoil.stats.price.toLocaleString('ja-JP')}`);
+  }
+  // 上限を下げると、反動は増える（減ることはない）
+  const tight = bestBuilds(gdb, m4, { ...DEFAULT_COND, budget: 60000 });
+  const loose = bestBuilds(gdb, m4, { ...DEFAULT_COND, budget: 300000 });
+  truthy(tight.recoil.stats.recoil >= loose.recoil.stats.recoil - 1e-9, '上限を下げて良くなった');
+  return `反動最小の部品代: ${notes.join(' / ')}`;
+});
+
+await check('買ったままの木は、標準の部品と同じ数値になる', () => {
+  for (const slug of ['m4a1', 'ak-74m', 'mp5', 'glock-17']) {
+    const g = gdb.bySlug.get(slug);
+    const parts = partsFromTree(gdb, g, stockTree(gdb, g));
+    const a = buildStats(gdb, g, parts, DEFAULT_COND);
+    const b = stockStats(gdb, g);
+    close(a.recoil, b.recoil, 1e-9, `${slug} の反動`);
+    close(a.ergo, b.ergo, 1e-9, `${slug} のエルゴ`);
+  }
+  return 'M4A1 / AK-74M / MP5 / Glock 17';
+});
+
+await check('計算の答えを木にして戻すと、同じ部品が同じ口に並ぶ', () => {
+  for (const k of KIND_KEYS) {
+    const build = allBuilds.get('m4a1')[k];
+    const back = partsFromTree(gdb, m4, treeFromParts(build.parts));
+    eq(back.map((p) => `${p.path}=${p.mod.id}`).join(';'),
+      build.parts.map((p) => `${p.path}=${p.mod.id}`).join(';'), `${k} が食い違う`);
+  }
+  return '3 通りとも一致';
+});
+
+await check('URL に入れた組み合わせを読み戻せる', () => {
+  const tree = treeFromParts(allBuilds.get('m4a1').balanced.parts);
+  const code = encodeTree(gdb, m4, tree);
+  truthy(code.length < 200, `長すぎる: ${code.length} 文字`);
+  truthy(/^[0-9a-z.]*$/.test(code), `URL に使えない文字がある: ${code}`);
+  const back = decodeTree(gdb, m4, code);
+  eq(encodeTree(gdb, m4, back), code, '読み戻すと変わる');
+  eq(decodeTree(gdb, m4, 'zzzz'), null, '付かない部品を読み込んだ');
+  eq(decodeTree(gdb, m4, '!!'), null, '壊れた文字列を読み込んだ');
+  return `${code.length} 文字`;
+});
+
+await check('部品を替えると、下の口は引き継ぐか埋める', () => {
+  const tree = treeFromParts(allBuilds.get('m4a1').balanced.parts);
+  const hgPath = 'mod_reciever/mod_handguard';
+  const row = builderRows(gdb, m4, tree).find((r) => r.path === hgPath);
+  truthy(row && row.mod, 'ハンドガードの行が無い');
+  const other = gdb.lists[row.ref].find((i) => i !== row.mod.i && (gdb.mods[i].sl || []).length);
+  const next = setPart(gdb, m4, DEFAULT_COND, tree, hgPath, other, rawWeight(0.5, allBuilds.get('m4a1').scale));
+  const after = builderRows(gdb, m4, next);
+  eq(after.find((r) => r.path === hgPath).mod.i, other, '替わっていない');
+  // 替えた部品の下の必須の口は埋まっている
+  eq(checkTree(gdb, m4, DEFAULT_COND, next).missing.length, 0, '必須の口が空いた');
+  // 元の木は変わっていない
+  eq(builderRows(gdb, m4, tree).find((r) => r.path === hgPath).mod.i, row.mod.i, '元の木が書き換わった');
+  // 外せば空きになり、必須なら問題として出る
+  const dropped = setPart(gdb, m4, DEFAULT_COND, tree, 'mod_reciever', null, 0.5);
+  truthy(checkTree(gdb, m4, DEFAULT_COND, dropped).missing.includes('mod_reciever'), '必須の口を空けても問題にならない');
+  return `${row.mod.s || row.mod.n} → ${gdb.mods[other].s || gdb.mods[other].n}`;
+});
+
+await check('同時に付けられない部品を選ぶと、問題として出る', () => {
+  // ストック一体型のグリップ（CQR）は、反動最小で選ばれる PRS GEN3 とぶつかる
+  const tree = treeFromParts(allBuilds.get('m4a1').recoil.parts);
+  const cqr = gdb.mods.find((m) => m.s === 'CQR AR15');
+  truthy(cqr, 'CQR が見つからない');
+  const next = setPart(gdb, m4, DEFAULT_COND, tree, 'mod_pistol_grip', cqr.i, 0);
+  const issues = checkTree(gdb, m4, DEFAULT_COND, next);
+  truthy(issues.conflicts.length > 0, 'ぶつかりを見つけられない');
+  eq(checkTree(gdb, m4, DEFAULT_COND, tree).conflicts.length, 0, '元の組み合わせでぶつかりが出た');
+  return issues.conflicts.map(([a, b]) => `${a.s || a.n} × ${b.s || b.n}`).join(', ');
+});
+
 /* --------------------------------------------------------------------- T35 */
 
 group('T35 画面の切り替え（地図・カスタム・アイテム）');
@@ -3283,12 +3402,12 @@ await check('index.html がサイトの枠を持っている', async () => {
 await check('新しい部品が配信物とプリキャッシュに揃っている', async () => {
   const sw = await fetch('../sw.js').then((r) => r.text());
   for (const f of ['./site.css', './src/app/site.js', './src/app/router.js', './src/app/ui.js',
-    './src/app/builds.js', './src/app/builds-page.js']) {
+    './src/app/builds.js', './src/app/builds-page.js', './src/app/build-chart.js']) {
     truthy(sw.includes(`'${f}'`), `${f} がプリキャッシュに無い`);
     eq((await fetch('../' + f.slice(2))).status, 200, `${f} が配信されていない`);
   }
   truthy(/db\?\.gunFile/.test(sw), 'install で gunFile を拾っていない');
-  return '6 ファイル + 銃のデータ';
+  return '7 ファイル + 銃のデータ';
 });
 
 /* -------------------------------------------------------------------- 出力 */

@@ -41,6 +41,7 @@ const PRECACHE = [
   './src/app/ui.js',
   './src/app/builds.js',
   './src/app/builds-page.js',
+  './src/app/build-chart.js',
   './items.html',
   './src/app/items-page.js',
   './src/app/items.js',

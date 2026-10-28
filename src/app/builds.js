@@ -62,11 +62,22 @@ export function decodeGuns(raw) {
   };
 }
 
-/** 条件の既定。トレーダーは全員 LL4、フリマあり、サプレッサーなし。 */
+/**
+ * 条件の既定。トレーダーは全員 LL4、フリマあり、サプレッサーなし、予算なし。
+ *
+ *   ll         全トレーダー共通の LL
+ *   lv         トレーダーごとの LL（トレーダー番号の順の配列）。あれば ll より優先
+ *   flea       フリマで買ってよいか
+ *   suppressor サプレッサーを使ってよいか
+ *   budget     部品代の上限（₽）。0 なら上限なし
+ */
 export const DEFAULT_COND = Object.freeze({ ll: 4, flea: true, suppressor: false });
 
 /** エルゴの上限。超えたぶんは何の役にも立たない */
 export const ERGO_CAP = 100;
+
+/** そのトレーダーの LL。トレーダーごとの指定が無ければ共通の LL */
+export const traderLL = (cond, t) => (cond.lv && cond.lv[t] !== undefined ? cond.lv[t] : cond.ll);
 
 /* ------------------------------------------------------------ 入手先 */
 
@@ -75,22 +86,32 @@ export const ERGO_CAP = 100;
  * 手に入らなければ null。
  *
  * 優先: 銃に最初から付いている > トレーダーで現金 > トレーダーと物々交換 > フリマ
+ *
+ * 予算を決めたときは、値段の分かるもの（最初から付いている・トレーダーで現金）だけにする。
+ * 交換とフリマは値段を持っていないので、入れると予算の中に収まっているか言えない。
  */
 export function sourceOf(mod, cond, gun) {
   if (gun && gun.defaults.has(mod.i)) return { kind: 'stock' };
-  const cash = (mod.b || []).filter(([, ll]) => ll <= cond.ll);
+  const cash = (mod.b || []).filter(([t, ll]) => ll <= traderLL(cond, t));
   if (cash.length) {
     // 低い LL で買えるほうを優先。同じなら安いほう
     const [t, ll, price, quest] = cash.slice().sort((x, y) => x[1] - y[1] || x[2] - y[2])[0];
     return { kind: 'trader', t, ll, price, quest: !!quest };
   }
-  const barter = (mod.bt || []).filter(([, ll]) => ll <= cond.ll);
+  if (cond.budget) return null;
+  const barter = (mod.bt || []).filter(([t, ll]) => ll <= traderLL(cond, t));
   if (barter.length) {
     const [t, ll, quest] = barter.slice().sort((x, y) => x[1] - y[1])[0];
     return { kind: 'barter', t, ll, quest: !!quest };
   }
   if (cond.flea && mod.fl !== undefined) return { kind: 'flea', level: mod.fl };
   return null;
+}
+
+/** 条件を 1 本の文字列にする。計算の結果を条件ごとに覚えておくのに使う */
+export function condKey(cond) {
+  return [cond.ll, cond.flea ? 1 : 0, cond.suppressor ? 1 : 0, cond.budget || 0,
+    cond.lv ? cond.lv.join('') : ''].join('|');
 }
 
 /* ------------------------------------------------------------ 計算 */
@@ -112,17 +133,19 @@ const isMagSlot = (slotId) => slotId === 'mod_magazine';
  * 銃と条件ごとに 1 回だけ作る下ごしらえ。
  *   ok      その部品を候補にしてよいか（入手先とサプレッサーの設定だけで決まる）
  *   parents 部品 → それを付けられる部品。候補を外したとき、計算し直す範囲を決めるのに使う
+ *   price   部品代（₽）。予算の計算に使う。最初から付いている部品は 0
  *   memo    重み s ごとの答え。スライダーを往復しても計算し直さない
  */
 const contexts = new WeakMap();
 function contextFor(db, gun, cond) {
-  const key = `${cond.ll}|${cond.flea ? 1 : 0}|${cond.suppressor ? 1 : 0}`;
+  const key = condKey(cond);
   let byCond = contexts.get(gun);
   if (!byCond) contexts.set(gun, (byCond = new Map()));
   let ctx = byCond.get(key);
   if (ctx) return ctx;
 
   const ok = new Map();
+  const price = new Map();
   const parents = new Map();
   const stack = [];
   const link = (child, parent) => {
@@ -139,13 +162,15 @@ function contextFor(db, gun, cond) {
     const m = db.mods[i];
     // サプレッサーを外す設定でも、銃に最初から付いているもの（PB や VSK-94 の
     // 一体型など）は残す。外すと標準の状態より悪い答えになる
-    ok.set(i, (cond.suppressor || !m.sup || gun.defaults.has(i)) && sourceOf(m, cond, gun) !== null);
+    const src = sourceOf(m, cond, gun);
+    ok.set(i, (cond.suppressor || !m.sup || gun.defaults.has(i)) && src !== null);
+    price.set(i, src && src.kind === 'trader' ? src.price : 0);
     for (const [, , ref] of m.sl || []) for (const c of db.lists[ref]) link(c, i);
   }
   let magFloor = 0;
   for (const i of gun.defaults) magFloor = Math.max(magFloor, db.mods[i].cap || 0);
 
-  ctx = { db, gun, cond, ok, parents, magFloor, memo: new Map() };
+  ctx = { db, gun, cond, ok, price, parents, magFloor, memo: new Map() };
   byCond.set(key, ctx);
   return ctx;
 }
@@ -169,15 +194,19 @@ function dirtyFrom(ctx, drop) {
  * base と dirty を渡すと、前に解いた答えのうち、外した部品に関係しない部分をそのまま使う。
  * 相性の探索では 1 回に 1〜数十個しか外さないので、解き直すのは祖先の数段だけで済む。
  *
- * @param {{a:number,b:number}} w 価値 = a·エルゴ − b·反動補正 − 軽さの小さな重み
+ * @param {{a:number,b:number,lam?:number,root?:Array}} w
+ *   価値 = a·エルゴ − b·反動補正 − lam·部品代 − 軽さの小さな重み。
+ *   lam は予算に収めるための値段の重み。root を渡すと、銃ではなくその差し込み口の並びから解く
+ *   （自分で組むときに、入れ替えた部品の下を埋めるのに使う）
  * @returns {{v:number, picks:Array, memo:Map}|null} 必須の口が埋まらなければ null
  */
 function solveOnce(ctx, w, banned, base = null, dirty = null) {
-  const { db, gun, ok, magFloor } = ctx;
+  const { db, ok, magFloor, price } = ctx;
   const memo = new Map(base || undefined);
   if (dirty) for (const i of dirty) memo.delete(i);
   const visiting = new Set();
-  const own = (m) => w.a * (m.e || 0) - w.b * (m.r || 0) - LIGHTER * (m.w || 0);
+  const lam = w.lam || 0;
+  const own = (m) => w.a * (m.e || 0) - w.b * (m.r || 0) - lam * price.get(m.i) - LIGHTER * (m.w || 0);
 
   function bestMod(i, depth) {
     if (memo.has(i)) return memo.get(i);
@@ -230,7 +259,7 @@ function solveOnce(ctx, w, banned, base = null, dirty = null) {
 
   let v = 0;
   const picks = [];
-  for (const [slotId, req, ref] of gun.sl) {
+  for (const [slotId, req, ref] of w.root || ctx.gun.sl) {
     const r = bestSlot(slotId, req, ref, 1);
     if (r === null) return null;
     v += r.v;
@@ -357,18 +386,55 @@ export function buildStats(db, gun, parts, cond) {
   };
 }
 
-/** 生の重み s（0 = 反動だけ, 1 = エルゴだけ）で解いて、表に出せる形にする。 */
-function solveAt(ctx, s) {
-  if (ctx.memo.has(s)) return ctx.memo.get(s);
+/** 重み s と値段の重み lam で解いて、表に出せる形にする。 */
+function solveWith(ctx, s, lam) {
   const w = {
     a: Math.max(s, SECONDARY),
     b: Math.max(1 - s, SECONDARY),
+    lam,
   };
   const res = solveFeasible(ctx, w);
-  let out = null;
-  if (res) {
-    const parts = flatten(ctx.db, res.picks);
-    out = { s, parts, stats: buildStats(ctx.db, ctx.gun, parts, ctx.cond) };
+  if (!res) return null;
+  const parts = flatten(ctx.db, res.picks);
+  return { s, parts, stats: buildStats(ctx.db, ctx.gun, parts, ctx.cond) };
+}
+
+// 値段の重みを探す範囲（log10）。部品 1 つの価値はせいぜい 30 ほどなので、
+// 1₽ あたり 0.1 にすると値段だけで決まる（いちばん安い組み合わせになる）
+const LAM_LO = -9;
+const LAM_HI = -1;
+
+/**
+ * 生の重み s（0 = 反動だけ, 1 = エルゴだけ）で解く。
+ *
+ * 予算があるときは、部品代に重み lam を掛けて価値から引く（ラグランジュ緩和）。
+ * lam を大きくするほど安い部品に寄るので、予算に収まる最小の lam を二分探索で探す。
+ * 予算ちょうどの最良とは限らないが（ナップサックは境目で外れることがある）、
+ * 必ず予算の中に収まり、その中ではほぼ最良になる。
+ */
+function solveAt(ctx, s) {
+  if (ctx.memo.has(s)) return ctx.memo.get(s);
+  const budget = ctx.cond.budget || 0;
+  let out = solveWith(ctx, s, 0);
+  if (out && budget && out.stats.price > budget) {
+    const cheapest = solveWith(ctx, s, 10 ** LAM_HI);
+    if (!cheapest || cheapest.stats.price > budget) {
+      out = null; // いちばん安く組んでも予算を超える
+    } else {
+      out = cheapest;
+      let lo = LAM_LO;
+      let hi = LAM_HI;
+      for (let k = 0; k < 14; k++) {
+        const mid = (lo + hi) / 2;
+        const b = solveWith(ctx, s, 10 ** mid);
+        if (b && b.stats.price <= budget) {
+          out = b;
+          hi = mid;
+        } else {
+          lo = mid;
+        }
+      }
+    }
   }
   ctx.memo.set(s, out);
   return out;
@@ -426,9 +492,7 @@ export function bestBuilds(db, gun, cond = DEFAULT_COND) {
 export function buildAt(db, gun, cond, t, scale) {
   const ctx = contextFor(db, gun, cond);
   if (t <= 0) return solveAt(ctx, 0);
-  const ke = t / scale.dE;
-  const kr = (1 - t) / scale.dR;
-  return capErgo(ctx, solveAt(ctx, ke / (ke + kr)));
+  return capErgo(ctx, solveAt(ctx, rawWeight(t, scale)));
 }
 
 /** 反動最小だけを出す。一覧で全銃を並べるときに使う（3 つ全部より軽い）。 */
@@ -478,6 +542,204 @@ export function compareRows(builds) {
       differs: ids.some((id) => id !== ids[0]),
     };
   });
+}
+
+/* ------------------------------------------------------------ 自分で組む */
+
+/*
+ * 自分で組むときは、部品を木のまま持つ。
+ *   節 = { mod: 部品番号（根は null）, kids: { 差し込み口の名前: 節 } }
+ * 根は銃そのもので、差し込み口は銃の口。計算の答え（parts の 1 列）と行き来できる。
+ */
+
+const slotsOf = (db, gun, node) => (node.mod === null ? gun.sl : db.mods[node.mod].sl || []);
+const parentPath = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+
+/**
+ * 買ったままの状態の木。標準の部品はどの口に付くかを持っていないので、
+ * 口ごとに「そこに付く標準の部品」を探して組み立て直す。
+ */
+export function stockTree(db, gun) {
+  const left = new Set(gun.defaults);
+  const grow = (slots, depth) => {
+    const kids = {};
+    if (depth > MAX_DEPTH) return kids;
+    for (const [slotId, , ref] of slots) {
+      const i = db.lists[ref].find((c) => left.has(c));
+      if (i === undefined) continue;
+      left.delete(i); // 同じ部品が 2 つの口に入らないように（URX のパネルのように 2 個付くものは別の ID）
+      kids[slotId] = { mod: i, kids: grow(db.mods[i].sl || [], depth + 1) };
+    }
+    return kids;
+  };
+  return { mod: null, kids: grow(gun.sl, 0) };
+}
+
+/** 計算の答え（parts）から木を作る。parts は親が子より先に並んでいる */
+export function treeFromParts(parts) {
+  const root = { mod: null, kids: {} };
+  const byPath = new Map([['', root]]);
+  for (const p of parts) {
+    const parent = byPath.get(parentPath(p.path));
+    if (!parent) continue;
+    const node = { mod: p.mod.i, kids: {} };
+    parent.kids[p.slot] = node;
+    byPath.set(p.path, node);
+  }
+  return root;
+}
+
+/**
+ * 木を、画面に並べる行にする。空いている口も 1 行として出す（そこに付けられるので）。
+ * @returns {Array<{path, slot, depth, required, ref, mod: Object|null}>}
+ */
+export function builderRows(db, gun, root) {
+  const out = [];
+  const walk = (node, path, depth) => {
+    if (depth > MAX_DEPTH) return;
+    for (const [slotId, req, ref] of slotsOf(db, gun, node)) {
+      const p = path ? `${path}/${slotId}` : slotId;
+      const k = node.kids[slotId] || null;
+      out.push({ path: p, slot: slotId, depth, required: !!req, ref, mod: k ? db.mods[k.mod] : null });
+      if (k) walk(k, p, depth + 1);
+    }
+  };
+  walk(root, '', 0);
+  return out;
+}
+
+/** 木に付いている部品を、計算の答えと同じ形の 1 列にする（buildStats に渡せる） */
+export function partsFromTree(db, gun, root) {
+  return builderRows(db, gun, root)
+    .filter((r) => r.mod)
+    .map((r) => ({ path: r.path, slot: r.slot, mod: r.mod, depth: r.depth }));
+}
+
+/** 生の重み s で、いくつかの差し込み口だけを埋める。答えは計算の picks の形 */
+function fillSlots(db, gun, cond, slots, s) {
+  if (!slots.length) return [];
+  const ctx = contextFor(db, gun, cond);
+  const res = solveFeasible(ctx, {
+    a: Math.max(s, SECONDARY), b: Math.max(1 - s, SECONDARY), root: slots,
+  });
+  return res ? res.picks : [];
+}
+
+const nodeFromPick = (p) => ({
+  mod: p.mod,
+  kids: Object.fromEntries(p.children.map((c) => [c.slot, nodeFromPick(c)])),
+});
+
+/**
+ * ある差し込み口の部品を入れ替えた木を返す（元の木は変えない）。mod が null なら外す。
+ *
+ * 新しい部品の下の口は、前の部品の下に同じ名前の口があり、そこに付いていた部品が
+ * 新しい部品にも付くなら、そのまま引き継ぐ（ハンドガードを替えてもフォアグリップは残る）。
+ * 引き継げなかった口は、重み s でいちばん良いもので埋める。
+ *
+ * @param {number} s 生の重み（0 = 反動だけ, 1 = エルゴだけ）
+ */
+export function setPart(db, gun, cond, root, path, mod, s) {
+  const segs = path.split('/');
+  const swap = (old) => {
+    if (mod === null) return null;
+    const node = { mod, kids: {} };
+    const rest = [];
+    for (const slot of db.mods[mod].sl || []) {
+      const [slotId, , ref] = slot;
+      const prev = old && old.kids[slotId];
+      if (prev && db.lists[ref].includes(prev.mod)) node.kids[slotId] = prev;
+      else rest.push(slot);
+    }
+    for (const p of fillSlots(db, gun, cond, rest, s)) node.kids[p.slot] = nodeFromPick(p);
+    return node;
+  };
+  const clone = (node, depth) => {
+    const copy = { mod: node.mod, kids: { ...node.kids } };
+    const slot = segs[depth];
+    if (depth === segs.length - 1) {
+      const next = swap(node.kids[slot]);
+      if (next) copy.kids[slot] = next;
+      else delete copy.kids[slot];
+    } else if (node.kids[slot]) {
+      copy.kids[slot] = clone(node.kids[slot], depth + 1);
+    }
+    return copy;
+  };
+  return clone(root, 0);
+}
+
+/**
+ * 自分で組んだものの問題点。
+ *   missing      必須なのに空いている口（ゲーム内では組み上がらない）
+ *   unavailable  この条件では手に入らない部品
+ *   conflicts    同時に付けられない組 [部品, 部品]
+ */
+export function checkTree(db, gun, cond, root) {
+  const rows = builderRows(db, gun, root);
+  const parts = rows.filter((r) => r.mod);
+  const ids = new Set(parts.map((r) => r.mod.i));
+  const conflicts = [];
+  for (const r of parts) {
+    for (const x of r.mod.conf) {
+      if (ids.has(x) && r.mod.i < x) conflicts.push([r.mod, db.mods[x]]);
+    }
+  }
+  return {
+    missing: rows.filter((r) => r.required && !r.mod).map((r) => r.path),
+    unavailable: parts.filter((r) => !sourceOf(r.mod, cond, gun)).map((r) => r.path),
+    conflicts,
+  };
+}
+
+/**
+ * 木を短い文字列にする（URL に載せて人に送れるように）。
+ * 差し込み口の順に、部品番号を 36 進で並べる。空いた口は空の欄。
+ * 部品番号はデータを作り直すとずれるので、読むときは口に付くかどうかを確かめる。
+ */
+export function encodeTree(db, gun, root) {
+  const out = [];
+  const walk = (node) => {
+    for (const [slotId] of slotsOf(db, gun, node)) {
+      const k = node.kids[slotId];
+      out.push(k ? k.mod.toString(36) : '');
+      if (k) walk(k);
+    }
+  };
+  walk(root);
+  while (out.length && out[out.length - 1] === '') out.pop();
+  return out.join('.');
+}
+
+/** encodeTree の逆。読めない・その口に付かない部品があれば null */
+export function decodeTree(db, gun, str) {
+  const toks = String(str || '').split('.');
+  let at = 0;
+  const walk = (node, depth) => {
+    if (depth > MAX_DEPTH) return false;
+    for (const [slotId, , ref] of slotsOf(db, gun, node)) {
+      if (at >= toks.length) return true;
+      const t = toks[at++];
+      if (t === '') continue;
+      const i = parseInt(t, 36);
+      if (!/^[0-9a-z]+$/.test(t) || !db.lists[ref].includes(i)) return false;
+      const k = { mod: i, kids: {} };
+      node.kids[slotId] = k;
+      if (!walk(k, depth + 1)) return false;
+    }
+    return true;
+  };
+  const root = { mod: null, kids: {} };
+  return walk(root, 0) ? root : null;
+}
+
+/** 配分 t（0〜1、正規化したもの）を、計算に使う生の重み s に直す */
+export function rawWeight(t, scale) {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  const ke = t / scale.dE;
+  const kr = (1 - t) / scale.dR;
+  return ke / (ke + kr);
 }
 
 /** 同じ口径の銃。自分は除く。 */
