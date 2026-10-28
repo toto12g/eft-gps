@@ -358,9 +358,30 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
     out_dir = DATA / "landmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 上流で施錠扉がごっそり抜けることがある（2026-10 に Interchange が 101 → 15 件）。
-    # 扉はゲーム側でそう変わるものではないので、前回の半分を割ったら抜けとみなし、
-    # 前回の扉を残す。鍵の一覧と「この鍵で開く扉」が急に空になるのを防ぐ。
+    # 鍵が「扉」として使われているマップ。上流はトランク（車のトランクなど）の鍵に、
+    # Factory 非常口の鍵の ID を仮に入れていることがある（2026-10 時点で 7 マップ・19 か所）。
+    # 扉としては別のマップでしか使われない鍵がトランクに付いていたら、鍵の名前を付けない。
+    # 付けたままだと、鍵の一覧に「Interchange で Factory 非常口の鍵 13 か所」のような嘘が出る
+    door_maps = {}
+    for key, groups in out.items():
+        for lk in groups.get("lock") or []:
+            if lk.get("k") and lk.get("t") == "door":
+                door_maps.setdefault(lk["k"], set()).add(key)
+
+    def strip_placeholder(lk, map_key):
+        homes = door_maps.get(lk.get("k"))
+        if lk.get("t") == "trunk" and homes and map_key not in homes:
+            lk = {k: v for k, v in lk.items() if k not in ("k", "n")}
+        return lk
+
+    for key, groups in out.items():
+        groups["lock"] = [strip_placeholder(lk, key) for lk in groups.get("lock") or []]
+
+    # 上流で施錠扉がごっそり抜けることがある（2026-10 に Interchange が 101 → 15 件。
+    # Goshan・IDEA・OLI のレジ 74 か所がまとめて消えた）。扉はゲーム側でそう変わるものでは
+    # ないので、前回の半分を割ったら抜けとみなし、今回の扉に、前回にしかない扉を足す。
+    # 前回をまるごと残すと、上流で新しく増えた扉（KORD のパス）が入らない。
+    # 足すのは鍵の分かるものだけ（鍵の無いトランクは、上流の仮の値だった可能性がある）
     for key, groups in out.items():
         prev_path = out_dir / f"{key}.json"
         if not prev_path.exists():
@@ -369,11 +390,22 @@ def build_landmarks(refresh: bool, api_maps: dict, interactive: dict,
             prev_locks = json.loads(prev_path.read_text(encoding="utf-8")).get("lock") or []
         except (json.JSONDecodeError, AttributeError):
             continue
-        now = len(groups.get("lock") or [])
-        if len(prev_locks) >= 20 and now < len(prev_locks) / 2:
-            groups["lock"] = prev_locks
-            print(f"  !! {key} の施錠扉が {len(prev_locks)} → {now} 件に減ったので、前回の扉を残します",
-                  file=sys.stderr)
+        cur = groups.get("lock") or []
+        if not (len(prev_locks) >= 20 and len(cur) < len(prev_locks) / 2):
+            continue
+        seen = {(lk.get("k"), tuple(round(v) for v in lk["p"])) for lk in cur}
+        added = 0
+        for lk in prev_locks:
+            lk = strip_placeholder(lk, key)
+            sig = (lk.get("k"), tuple(round(v) for v in lk["p"]))
+            if not lk.get("k") or sig in seen:
+                continue
+            cur.append(lk)
+            seen.add(sig)
+            added += 1
+        groups["lock"] = cur
+        print(f"  !! {key} の施錠扉が上流で {len(prev_locks)} → {len(cur) - added} 件に減ったので、"
+              f"前回にしかない {added} 件を足しました", file=sys.stderr)
 
     for stale in out_dir.glob("*.json"):
         stale.unlink()

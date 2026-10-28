@@ -1518,7 +1518,10 @@ group('T27 鍵と施錠扉');
 await check('すべての施錠扉が鍵の ID と名前を持つ', async () => {
   // 鍵の名前で一覧を作るので、名前が欠けると「名前のない鍵」に落ちる。
   // ID も無いと同じ鍵の扉をまとめられない
+  // ただしトランクは例外。上流はトランクに Factory 非常口の鍵の ID を仮に入れていることがあり、
+  // build_data.py がそれを外す（鍵の情報なし）。嘘の鍵名を出すより、空けておくほうがよい
   let total = 0;
+  let trunks = 0;
   const noKey = [];
   const noName = [];
   for (const m of db.maps) {
@@ -1526,6 +1529,7 @@ await check('すべての施錠扉が鍵の ID と名前を持つ', async () => 
     const lm = await loadLandmarks(m.key, '../' + m.landmarkFile);
     for (const lock of lm.lock || []) {
       total++;
+      if (lock.t === 'trunk' && !lock.k) { trunks++; continue; }
       if (!lock.k) noKey.push(`${m.key}/${lock.n || '?'}`);
       if (!lock.n) noName.push(`${m.key}/${lock.k || '?'}`);
     }
@@ -1533,7 +1537,21 @@ await check('すべての施錠扉が鍵の ID と名前を持つ', async () => 
   eq(noName.length, 0, `名前が無い扉: ${noName.slice(0, 3).join(', ')}`);
   truthy(noKey.length === 0, `鍵の ID が無い扉: ${noKey.slice(0, 3).join(', ')}`);
   truthy(total >= 300, `施錠扉が少なすぎる: ${total}`);
-  return `${total} 箇所すべてに鍵の ID と名前がある`;
+  return `${total} 箇所（鍵の情報が無いトランク ${trunks} を除き、鍵の ID と名前がある）`;
+});
+
+await check('Interchange の鍵が Wiki の一覧と揃っている', async () => {
+  // 2026-10、上流から Interchange のレジ 74 か所が抜け、Factory の鍵の仮の値が 13 か所入っていた。
+  // Wiki の「Usable Keys」は 16 種類（レジ 3・扉と鍵 13）
+  const ic = await loadLandmarks('interchange', '../' + db.byKey.get('interchange').landmarkFile);
+  const names = new Set((ic.lock || []).map((l) => l.n).filter(Boolean));
+  truthy(!names.has('Factory 非常口の鍵'), 'Factory の鍵が Interchange に出ている');
+  for (const want of ['Goshan のレジの鍵', 'IDEA のレジの鍵', 'OLI のレジの鍵', 'Kiba Arms の外部扉の鍵']) {
+    truthy(names.has(want), `${want} が無い`);
+  }
+  truthy([...names].some((n) => n.includes('KORD')), 'KORD のパスが無い');
+  eq(names.size, 16, `鍵の種類: ${[...names].join(', ')}`);
+  return `${names.size} 種類`;
 });
 
 await check('鍵の名前が内部 ID のまま残っていない', async () => {
