@@ -18,7 +18,7 @@ import { normalizeQuery } from './tasks.js';
 import { hashFor } from './router.js';
 import {
   escapeHtml as esc, crumbs, openModal, closeModal, carouselHtml, setupCarousels, readStore,
-  writeStore, loadMeta, itemImage, toast, signed, trim1, rub, kg,
+  writeStore, loadMeta, itemImage, partThumb, toast, signed, trim1, rub, kg,
 } from './ui.js';
 
 const COND_KEY = 'eft-gps.buildCond';
@@ -566,6 +566,8 @@ function buildCard(kind, build) {
 
 function partEffect(m) {
   const out = [];
+  // マガジンは略称が同じもの（GEN M3 の 10 / 20 / 30 / 40 発）が並ぶので、装弾数で見分けられるようにする
+  if (m.cap) out.push(`${m.cap} 発`);
   if (m.e) out.push(`エルゴ ${signed(m.e)}`);
   if (m.r) out.push(`反動 ${signed(m.r)}%`);
   return out.join(' ・ ') || '数値の変化なし';
@@ -586,10 +588,11 @@ function sourceTag(src) {
 function partCell(p) {
   if (!p) return '<span class="none">—</span>';
   const m = p.mod;
-  return `<button type="button" class="part" data-mod="${m.i}">
-      <span class="pn">${esc(m.s || m.n)}</span>
-      <span class="pm">${partEffect(m)}</span>
-    </button>${sourceTag(p.source)}`;
+  return `<div class="pcell"><button type="button" class="part" data-mod="${m.i}" title="${esc(m.n)}">
+      ${partThumb(m.id)}
+      <span class="ptx"><span class="pn">${esc(m.s || m.n)}</span>
+      <span class="pm">${partEffect(m)}</span></span>
+    </button>${sourceTag(p.source)}</div>`;
 }
 
 function compareTable(b) {
@@ -827,7 +830,7 @@ function renderBuilder() {
         <tbody>${rows.filter((r) => r.mod || r.required || state.showEmpty).map((r) => {
           const src = r.mod ? sourceOf(r.mod, cond, gun) : null;
           const cls = [r.mod ? '' : 'empty', !r.mod && r.required ? 'missing' : ''].filter(Boolean).join(' ');
-          return `<tr class="${cls}">
+          return `<tr class="${cls}" style="--d:${r.depth}">
             <th scope="row" style="--d:${r.depth}"><span class="slot${r.depth ? ' sub' : ''}">${label(r.slot)}</span>${r.required ? '<span class="req">必須</span>' : ''}</th>
             <td>${r.mod ? partCell({ mod: r.mod, source: src }) : '<span class="none">空き</span>'}</td>
             <td class="ops"><div class="ops-in">
@@ -881,10 +884,11 @@ function renderPickList() {
   // 手に入らないものは後ろへ。選べはする（先の計画を立てるのに使える）
   list = [...list.filter((m) => sourceOf(m, cond, gun)), ...list.filter((m) => !sourceOf(m, cond, gun))];
   const cur = row.mod ? row.mod.i : null;
-  box.innerHTML = (row.required ? '' : `<li><button type="button" class="pick-row" data-pick="none">
+  box.innerHTML = (row.required ? '' : `<li><button type="button" class="pick-row none-row" data-pick="none">
       <span class="pn">${row.mod ? '外す（空きにする）' : '付けない'}</span></button></li>`)
-    + list.map((m) => `<li><button type="button" class="pick-row${m.i === cur ? ' cur' : ''}" data-pick="${m.i}"
+    + list.map((m) => `<li><button type="button" class="pick-row${m.i === cur ? ' cur' : ''}" data-pick="${m.i}" title="${esc(m.n)}"
         ${m.i === cur ? 'aria-current="true"' : ''}>
+        ${partThumb(m.id)}
         <span class="pn">${esc(m.s || m.n)}${m.i === cur ? ' <small>（いま付いている）</small>' : ''}</span>
         <span class="pm">${partEffect(m)}</span>
         ${sourceTag(sourceOf(m, cond, gun))}

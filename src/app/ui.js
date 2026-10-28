@@ -53,6 +53,15 @@ export function loadMeta() {
 /** tarkov.dev の画像。URL はアイテムの ID から組み立てられるので、データには持たない */
 export const itemImage = (id, kind = 'grid-image') => `https://assets.tarkov.dev/${id}-${kind}.webp`;
 
+/**
+ * 部品の小さな画像。tarkov.dev の grid-image は、ゲームの持ち物の画面のアイコンそのもの
+ * （背景の色と、隅の略称まで焼き込まれている）なので、ふだん見ている姿で見分けられる。
+ * 取れないとき（オフラインなど）は枠だけ残して、行の高さが変わらないようにする。
+ */
+export const partThumb = (id) =>
+  `<span class="pthumb inv"><img loading="lazy" decoding="async" alt="" src="${itemImage(id)}"
+     onerror="this.style.visibility='hidden'"></span>`;
+
 /* ------------------------------------------------------------ パンくず */
 
 /**

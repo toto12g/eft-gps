@@ -3354,6 +3354,18 @@ await check('同時に付けられない部品を選ぶと、問題として出�
   return issues.conflicts.map(([a, b]) => `${a.s || a.n} × ${b.s || b.n}`).join(', ');
 });
 
+await check('部品に、持ち物の画面と同じ画像が付く', async () => {
+  // 画像の URL はデータに持たせず、部品の ID から組み立てる（アイテムの用途と同じ方針）
+  const ui = await fetch('../src/app/ui.js').then((r) => r.text());
+  truthy(/export const partThumb = \(id\) =>[\s\S]{0,120}itemImage\(id\)/.test(ui), '部品の画像を ID から作っていない');
+  const page = await fetch('../src/app/builds-page.js').then((r) => r.text());
+  // 比べる表・自分で組む表・配分の一覧（partCell）と、部品を選ぶ小窓の 2 か所
+  truthy((page.match(/partThumb\(m\.id\)/g) || []).length >= 2, '部品の表か選ぶ小窓に画像が無い');
+  truthy(!gunRaw.mods.some((m) => Object.values(m).some((v) => typeof v === 'string' && v.includes('assets.tarkov.dev'))),
+    'データに画像の URL が入っている');
+  return '表・選ぶ小窓とも、ID から tarkov.dev の画像を出す';
+});
+
 /* --------------------------------------------------------------------- T35 */
 
 group('T35 画面の切り替え（地図・カスタム・アイテム）');

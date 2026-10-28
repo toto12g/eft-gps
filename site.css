@@ -271,14 +271,24 @@ body[data-route="items"] #view-items { display: block; }
 .compare tbody tr.differs th { color: var(--ink-2); }
 .compare.diff-only tbody tr:not(.differs) { display: none; }
 .compare tbody tr:last-child th, .compare tbody tr:last-child td { border-bottom-color: var(--ink-2); }
+/* 部品 1 つぶん。左に持ち物の画面と同じ画像、右に名前と数値、下に入手先 */
+.pcell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .page .part {
-  display: block; padding: 0; border: 0; background: none; cursor: pointer;
+  display: grid; grid-template-columns: var(--thumb-w) minmax(0, 1fr); gap: 10px; align-items: center;
+  padding: 0; border: 0; background: none; cursor: pointer;
   font: 600 13.5px/1.45 var(--sans); color: var(--ink);
 }
 .page .part:hover { color: var(--accent); }
 .page .part:hover .pn { text-decoration: underline; text-underline-offset: 2px; }
+.page .part:hover .pthumb { border-color: var(--accent); }
+.part .ptx { min-width: 0; }
+.part .pn { display: block; }
 .part .pm { display: block; font: 400 12.5px/1.5 var(--num); color: var(--muted); }
-.compare td .tag, .parts-list .tag { margin-top: 3px; }
+.pcell > .tag { margin-left: calc(var(--thumb-w) + 10px); }
+:root { --thumb-w: 84px; --thumb-h: 46px; }
+/* 画像は縦長（マガジン）も横長（バレル）もあるので、枠いっぱいに縦横比を保って収める */
+.pthumb { position: relative; display: block; flex: none; width: var(--thumb-w); height: var(--thumb-h); overflow: hidden; }
+.pthumb img { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); max-width: none; max-height: none; object-fit: contain; }
 .compare .none { color: #5d5852; }
 .compare tfoot th, .compare tfoot td { background: var(--panel); border-bottom-color: var(--rule); }
 .compare tfoot td { font: 15px/1.4 var(--num); font-variant-numeric: tabular-nums; }
@@ -302,7 +312,6 @@ body[data-route="items"] #view-items { display: block; }
   padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 13px;
 }
 .parts-list .slot { padding-left: calc(var(--d, 0) * 14px); color: var(--muted); font-size: 12.5px; }
-.parts-list li > .tag { grid-column: 2; justify-self: start; }
 
 /* ------------------------------------------------------------ アコーディオン */
 
@@ -613,18 +622,34 @@ dialog.modal::backdrop { background: rgba(6, 8, 9, .72); }
 .pick-list li { border-bottom: 1px solid var(--rule); }
 .pick-list .none { padding: 12px 4px; color: var(--muted); font-size: 13px; }
 .modal .pick-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; width: 100%;
+  display: grid; grid-template-columns: var(--thumb-w) minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; width: 100%;
   padding: 8px 6px; border: 0; border-radius: 0; background: transparent; cursor: pointer;
 }
 .modal .pick-row:hover { background: var(--panel-2); }
+.modal .pick-row:hover .pthumb { border-color: var(--accent); }
 .modal .pick-row.cur { box-shadow: inset 2px 0 0 var(--accent); background: var(--panel-2); }
-.pick-row .pn { font-weight: 700; font-size: 13.5px; color: var(--ink); }
+.pick-row .pthumb { grid-column: 1; grid-row: 1 / span 2; }
+.pick-row .pn { grid-column: 2; font-weight: 700; font-size: 13.5px; color: var(--ink); }
+.pick-row.none-row .pn { grid-column: 1 / -1; }
 .pick-row .pn small { font-weight: 400; color: var(--muted); }
-.pick-row .pm { grid-column: 1; font: 12.5px/1.5 var(--num); color: var(--muted); }
-.pick-row .tag { grid-column: 2; grid-row: 1 / span 2; }
+.pick-row .pm { grid-column: 2; font: 12.5px/1.5 var(--num); color: var(--muted); }
+.pick-row .tag { grid-column: 3; grid-row: 1 / span 2; }
 
 @media (max-width: 860px) {
+  :root { --thumb-w: 58px; --thumb-h: 32px; }
   .tradeoff-wrap { grid-template-columns: minmax(0, 1fr); }
   .legend { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; }
   .bld tbody th { width: 130px; }
+}
+
+/* スマホでは「自分で組む」の表を横に並べず、口の名前の下に部品とボタンを置く */
+@media (max-width: 600px) {
+  .table-scroll:has(> .bld) { overflow: visible; border: 0; }
+  .bld { min-width: 0; }
+  .bld thead { display: none; }
+  .bld tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+  .bld tbody th, .bld tbody td { padding: 0; border: 0; }
+  .bld tbody th { grid-column: 1 / -1; width: auto; }
+  .bld tbody td:not(.ops) { padding-left: calc(var(--d, 0) * 14px); }
+  .bld .ops { width: auto; align-self: start; }
 }
