@@ -9,6 +9,7 @@
 <link rel="icon" href="./icons/icon-192.png">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="./site.css">
 <style>
 :root {
   --bg: #0f0f10; --panel: #181716; --panel-2: #201f1d; --panel-3: #2a2826; --rule: #2e2b28;
@@ -23,9 +24,13 @@ html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--ink);
   font: 13px/1.7 var(--sans); display: grid;
-  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
+/* 地図の画面。カスタムやアイテムの画面はこの上に重なる（site.css）。
+   isolation で Leaflet の z-index をこの中に閉じ込め、上に重ねた画面を突き抜けないようにする */
+#view-map { grid-row: 2; grid-column: 1; display: grid; min-height: 0;
+            grid-template-rows: minmax(0, 1fr) auto; isolation: isolate; }
 
 h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 h1 small { display: block; font: 400 10px/1.5 var(--mono); color: var(--muted);
@@ -203,7 +208,8 @@ details.about[open] > summary { margin-bottom: 4px; }
 .grow { flex: 1; }
 #topbar { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px;
           background: var(--panel); border-bottom: 1px solid var(--rule); min-width: 0; }
-#topbar .brand { font: 800 15px/1 var(--sans); letter-spacing: .04em; white-space: nowrap; }
+#topbar .brand { font: 800 15px/1 var(--sans); letter-spacing: .04em; white-space: nowrap;
+                 color: var(--ink); text-decoration: none; }
 #map-tabs { display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--panel-2);
             overflow-x: auto; min-width: 0; }
 #map-tabs button { width: auto; flex: none; border: 0; border-radius: 7px; background: transparent;
@@ -519,7 +525,7 @@ body.dock-collapsed #dock { display: none; }
 }
 
 @media (max-width: 900px) {
-  body { overflow: auto; grid-template-rows: auto 60vh auto; }
+  #view-map { overflow-y: auto; grid-template-rows: 60vh auto; }
   #topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; }
   #dock { grid-template-columns: minmax(0, 1fr); }
 }
@@ -573,7 +579,15 @@ body.dock-collapsed #dock { display: none; }
 /* 拡大したときだけ細かいラベルを出す */
 </style>
 </head>
-<body>
+<body data-route="map">
+<script>
+  // 最初の描画の前に、どの画面かを決めておく。#/builds を直接開いたときに
+  // 一瞬だけ地図が見えてしまうのを防ぐ（本体の切り替えは src/app/site.js）
+  (function () {
+    var m = /^#\/(builds|items)\b/.exec(location.hash);
+    if (m) document.body.dataset.route = m[1];
+  })();
+</script>
 
 <div id="setup" class="setup" hidden>
   <div class="setup-card">
@@ -657,27 +671,39 @@ body.dock-collapsed #dock { display: none; }
   新しい版が届いています。<button type="button" id="btn-reload">再読み込み</button>
 </div>
 
-<!-- 画面は 3 段: 上の帯（マップの切り替え）/ 地図 / 下のドック（現在地・タスク・最寄りの脱出口）。
+<!-- 上の帯はどの画面でも同じ。左にメニューとサイト内の移動、地図の画面のときだけ
+     マップの切り替えが続く（data-only="map" は地図以外の画面で隠れる）。
+     地図の画面は 3 段: 上の帯 / 地図 / 下のドック（現在地・タスク・最寄りの脱出口）。
      レイド中にちらっと見るものだけをドックに置き、それ以外は右から出る引き出しにまとめる -->
 <header id="topbar">
-  <span class="brand">EFT GPS</span>
-  <nav id="map-tabs" aria-label="よく使うマップ"></nav>
-  <label class="top-select" title="すべてのマップ">
+  <button type="button" id="btn-menu" aria-expanded="false" aria-controls="site-menu" aria-label="メニュー">
+    <span class="bars" aria-hidden="true"></span>
+  </button>
+  <a class="brand" href="#/map">EFT GPS</a>
+  <nav id="site-nav" aria-label="サイト内の移動">
+    <a href="#/map" data-route-link="map">地図</a>
+    <a href="#/builds" data-route-link="builds">カスタム</a>
+    <a href="#/items" data-route-link="items">アイテム</a>
+  </nav>
+  <span class="nav-sep" data-only="map" aria-hidden="true"></span>
+  <nav id="map-tabs" data-only="map" aria-label="よく使うマップ"></nav>
+  <label class="top-select" data-only="map" title="すべてのマップ">
     <span class="visually-hidden">マップ</span>
     <select id="map-select"></select>
   </label>
-  <label class="top-select" title="フロア">
+  <label class="top-select" data-only="map" title="フロア">
     <span class="visually-hidden">フロア</span>
     <select id="floor-select" disabled></select>
   </label>
   <span class="grow"></span>
   <span id="world-clock" title="ワールド時計">--:-- / --:--</span>
-  <button type="button" id="btn-open-tasks" class="top-btn" aria-expanded="false" aria-controls="drawer">タスク</button>
-  <button type="button" id="btn-open-settings" class="top-btn icon" aria-expanded="false" aria-controls="drawer" aria-label="表示と設定">
+  <button type="button" id="btn-open-tasks" class="top-btn" data-only="map" aria-expanded="false" aria-controls="drawer">タスク</button>
+  <button type="button" id="btn-open-settings" class="top-btn icon" data-only="map" aria-expanded="false" aria-controls="drawer" aria-label="表示と設定">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>
   </button>
 </header>
 
+<div id="view-map">
 <div id="map-area">
   <div id="map"></div>
   <div id="map-missing" hidden>このマップの地図画像はまだありません。測位と検証は動きます。</div>
@@ -772,11 +798,10 @@ body.dock-collapsed #dock { display: none; }
         <input type="search" id="item-filter" aria-label="アイテムの用途を調べる"
                placeholder="アイテム名を入れて Enter（電線 / wires …）" autocomplete="off">
         <div class="btn-row" style="margin-top:5px">
-          <a class="btn-link" id="btn-items" href="./items.html" target="_blank"
-             rel="noopener">アイテム一覧を別タブで開く</a>
+          <a class="btn-link" id="btn-items" href="#/items">アイテム一覧を開く</a>
         </div>
-        <div class="hint-line">画像つきの一覧は別ページです。ここで打って Enter を押すと、
-          その言葉で検索した状態で開きます。</div>
+        <div class="hint-line">ここで打って Enter を押すと、その言葉で検索した一覧に移ります。
+          上の帯の「地図」で戻れます。そのあいだもフォルダの監視は止まりません。</div>
       </details>
 
       <details class="sec" data-sec="watch" open>
@@ -872,8 +897,86 @@ body.dock-collapsed #dock { display: none; }
     地図素材のライセンス上、<b>ゲーム画面に重ねての使用は禁止</b>されています。
   </p>
 </footer>
+</div>
+
+<!-- 地図の上に重ねる画面。中身は src/app/builds-page.js と items-page.js が描く -->
+<main id="view-builds" class="page" data-view="builds" aria-label="カスタム"></main>
+<main id="view-items" class="page" data-view="items" aria-label="アイテムの用途"></main>
+
+<!-- 左から出るメニュー -->
+<div id="site-menu" class="site-menu" hidden>
+  <div class="scrim"></div>
+  <nav class="sheet" aria-label="メニュー">
+    <div class="sheet-head">
+      <span class="brand">EFT GPS</span>
+      <button type="button" class="menu-close" aria-label="メニューを閉じる">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <section class="menu-sec">
+      <h2><a href="#/map" data-route-link="map">地図</a></h2>
+      <p class="menu-note">スクリーンショットのファイル名から現在地を出します。</p>
+      <div id="menu-maps" class="menu-maps"></div>
+    </section>
+
+    <section class="menu-sec">
+      <h2><a href="#/builds" data-route-link="builds">カスタム</a></h2>
+      <p class="menu-note">銃ごとに、反動最小・バランス・エルゴ最大の部品の組み合わせ。</p>
+      <div class="menu-links">
+        <a href="#/builds?cat=assault-rifle">アサルトライフル</a>
+        <a href="#/builds?cat=assault-carbine">アサルトカービン</a>
+        <a href="#/builds?cat=smg">サブマシンガン</a>
+        <a href="#/builds?cat=marksman">マークスマンライフル</a>
+        <a href="#/builds?cat=sniper">スナイパーライフル</a>
+        <a href="#/builds?cat=machinegun">マシンガン</a>
+        <a href="#/builds?cat=shotgun">ショットガン</a>
+        <a href="#/builds?cat=pistol">ハンドガン</a>
+      </div>
+    </section>
+
+    <section class="menu-sec">
+      <h2><a href="#/items" data-route-link="items">アイテムの用途</a></h2>
+      <p class="menu-note">ハイドアウト・タスク・交換・製作で何個使うか。</p>
+      <div class="menu-links">
+        <a href="#/items?use=h">ハイドアウトで使う</a>
+        <a href="#/items?use=t">タスクで使う</a>
+        <a href="#/items?use=fir">FiR が要る</a>
+      </div>
+    </section>
+
+    <section class="menu-sec">
+      <h2>そのほか</h2>
+      <div class="menu-links">
+        <button type="button" data-act="setup">はじめての設定（フォルダの接続）</button>
+        <a href="./calibrate.html">地図の校正ツール</a>
+      </div>
+    </section>
+
+    <p class="menu-foot">
+      非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。<br>
+      データ元 tarkov.dev / Escape from Tarkov Wiki<br>
+      <span id="menu-stamp"></span>
+    </p>
+  </nav>
+</div>
+
+<!-- 部品やアイテムの詳細。ui.js の openModal が中身を入れる -->
+<dialog id="modal" class="modal" aria-labelledby="modal-title">
+  <div class="modal-frame">
+    <div class="modal-bar">
+      <button type="button" class="modal-close" aria-label="閉じる">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body"></div>
+  </div>
+</dialog>
+
+<div id="toast" role="status" hidden></div>
 
 <script src="./vendor/leaflet/leaflet.js"></script>
+<script type="module" src="./src/app/site.js"></script>
 <script type="module" src="./src/app/main.js"></script>
 </body>
 </html>

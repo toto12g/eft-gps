@@ -1,0 +1,504 @@
+/*
+ * サイトの枠（上の帯のサイト内の移動・左のメニュー・詳細の小窓）と、
+ * カスタム・アイテムの用途の画面。地図の画面の見た目は index.html の <style> にある。
+ *
+ * 色と字の基本は index.html の :root を使う。ここで足すのは数字の書体と、
+ * 部品の入手先の色、在庫のマス目の模様だけ。
+ *
+ * index.html には「button は幅いっぱい・等幅」「label は大文字の小見出し」という
+ * 地図の画面向けの決まりがあるので、ここで作る部品はそれぞれ自分の中で戻している。
+ */
+
+:root {
+  /* 数字。Windows には Bahnschrift（DIN 系）が入っている。数字の幅が揃っていて、
+     表を縦に見たときに桁がずれない */
+  --num: "Bahnschrift", "DIN Alternate", "Barlow Semi Condensed", "Arial Narrow", var(--sans);
+  --page-max: 1180px;
+  /* ゲームの持ち物の画面のマス目 */
+  --cell: #1a1917;
+  --cell-line: rgba(255, 255, 255, .035);
+  --cell-edge: #36322d;
+  /* 入手先 */
+  --flea: #ffc848;
+  --barter: #8fbde0;
+  --stock: #8fe0a2;
+  /* 3 通りの組み合わせの色。表の見出しとカードで同じものを使う */
+  --k-recoil: #ff8a3d;
+  --k-balanced: #d6c08a;
+  --k-ergo: #7fb8e6;
+}
+
+/* ------------------------------------------------------------ 上の帯 */
+
+#btn-menu {
+  flex: none; width: 38px; height: 38px; padding: 0; margin-left: -6px;
+  display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent;
+  color: var(--ink-2);
+}
+#btn-menu:hover, #btn-menu[aria-expanded="true"] { background: var(--panel-2); color: var(--ink); }
+#btn-menu .bars, #btn-menu .bars::before, #btn-menu .bars::after {
+  display: block; width: 16px; height: 2px; border-radius: 1px; background: currentColor;
+}
+#btn-menu .bars { position: relative; }
+#btn-menu .bars::before, #btn-menu .bars::after { content: ''; position: absolute; left: 0; }
+#btn-menu .bars::before { top: -5px; }
+#btn-menu .bars::after { top: 5px; }
+
+#site-nav { display: flex; align-self: stretch; flex: none; }
+#site-nav a {
+  display: flex; align-items: center; padding: 0 12px; margin-bottom: -1px;
+  border-bottom: 2px solid transparent; color: var(--muted); text-decoration: none;
+  font: 600 13px/1 var(--sans); white-space: nowrap;
+}
+#site-nav a:hover { color: var(--ink); }
+#site-nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+.nav-sep { flex: none; width: 1px; height: 24px; background: var(--rule); }
+
+/* 地図の画面だけで使うもの。site.js が body に今の画面を書く */
+body:not([data-route="map"]) [data-only="map"] { display: none !important; }
+
+@media (max-width: 760px) {
+  #site-nav, .nav-sep { display: none; }
+}
+
+/* ------------------------------------------------------------ 重ねる画面 */
+
+.page {
+  grid-row: 2; grid-column: 1; z-index: 2; min-height: 0; display: none;
+  overflow-y: auto; background: var(--bg);
+  font-size: 14px; line-height: 1.75; color: var(--ink);
+  scrollbar-color: var(--panel-3) transparent;
+}
+body[data-route="builds"] #view-builds,
+body[data-route="items"] #view-items { display: block; }
+
+.page-inner { max-width: var(--page-max); margin: 0 auto; padding: 18px 24px 64px; }
+.page h1 { margin: 0 0 6px; font: 700 24px/1.35 var(--sans); letter-spacing: .01em; }
+.page h2 {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px;
+  margin: 40px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--rule);
+  font: 700 17px/1.4 var(--sans);
+}
+.page h2 small { font: 400 12.5px/1.5 var(--sans); color: var(--muted); }
+.page h2 .h-tool { margin: 0 0 0 auto; }
+.page h2.h-sub { margin: 0; padding: 0; border: 0; font-size: 15px; }
+.page a { color: var(--accent-2); }
+.page p { margin: 0 0 10px; }
+.page .note { font-size: 12.5px; color: var(--muted); margin: 10px 0 0; }
+.page .loading, .page .empty { color: var(--muted); padding: 28px 2px; }
+.page .empty a { margin-left: 6px; }
+
+/* index.html の「label は小見出し」「input は等幅で幅いっぱい」を、画面の中では戻す */
+.page label, .site-menu label, .modal label {
+  display: inline; margin: 0; font: inherit; letter-spacing: normal; text-transform: none; color: inherit;
+}
+.page label.check { display: inline-flex; gap: 7px; align-items: center; margin: 0; font-size: 13px; color: var(--ink-2); }
+.page label.check input { margin: 0; }
+.page select, .page input[type="search"] {
+  width: auto; padding: 6px 10px; border-radius: 5px; font: 14px/1.4 var(--sans);
+}
+.page input[type="search"] { width: min(380px, 100%); }
+.page button, .site-menu button, .modal button {
+  width: auto; font: inherit; color: inherit; text-align: left;
+}
+
+/* パンくず */
+.crumbs ol {
+  display: flex; flex-wrap: wrap; margin: 0 0 16px; padding: 0; list-style: none;
+  font-size: 12.5px; color: var(--muted);
+}
+.crumbs li + li::before { content: '›'; margin: 0 9px; color: #6a645d; }
+.crumbs a { color: var(--ink-2); text-decoration: none; }
+.crumbs a:hover { color: var(--accent); text-decoration: underline; }
+.crumbs [aria-current] { color: var(--ink); }
+
+.page-head { margin-bottom: 18px; }
+.kicker { margin: 0 0 2px !important; font-size: 12.5px; color: var(--muted); }
+.lede { max-width: 70ch; color: var(--ink-2); }
+.sub { margin: 0 !important; font-size: 13px; color: var(--muted); }
+
+/* 持ち物のマス目。画像の背景に敷く */
+.inv {
+  background-color: var(--cell);
+  background-image:
+    linear-gradient(var(--cell-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cell-line) 1px, transparent 1px);
+  background-size: 20px 20px;
+  border: 1px solid var(--cell-edge); border-radius: 3px;
+}
+.inv img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* ボタン風のリンク */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+  border: 1px solid var(--rule); border-radius: 5px; background: var(--panel);
+  color: var(--ink-2) !important; font: 13px/1.4 var(--sans); text-decoration: none; cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent) !important; }
+
+/* 小さな札。入手先や必要なトレーダー */
+.tag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 6px;
+  border: 1px solid var(--rule); border-radius: 3px; white-space: nowrap;
+  font: 12px/1.7 var(--sans); color: var(--ink-2);
+}
+.tag b { font: 600 12px/1 var(--num); color: var(--ink); }
+.tag.flea { color: var(--flea); border-color: color-mix(in srgb, var(--flea) 38%, transparent); }
+.tag.barter { color: var(--barter); border-color: color-mix(in srgb, var(--barter) 38%, transparent); }
+.tag.stock { color: var(--stock); border-color: color-mix(in srgb, var(--stock) 38%, transparent); }
+.tag.quest { border-style: dashed; }
+.tag.fir { color: #ff9db0; border-color: #5d2f3c; background: #3a1f28; font-weight: 700; font-size: 11px; }
+.need { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ------------------------------------------------------------ 条件 */
+
+.cond {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px;
+  padding: 10px 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+  font-size: 13px;
+}
+.cond-item { display: inline-flex; align-items: center; gap: 10px; }
+.cond .k { color: var(--muted); font-size: 12.5px; }
+.cond-note { margin-left: auto; color: var(--muted); font-size: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+.page .seg button {
+  min-width: 34px; padding: 3px 0; border: 0; border-radius: 0; background: transparent;
+  color: var(--ink-2); font: 600 14px/1.5 var(--num); text-align: center;
+}
+.page .seg button + button { border-left: 1px solid var(--rule); }
+.page .seg button:hover { background: var(--panel-2); color: var(--ink); }
+.page .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+
+/* ------------------------------------------------------------ 銃の一覧 */
+
+.tabs {
+  display: flex; margin: 26px 0 0; border-bottom: 1px solid var(--rule);
+  overflow-x: auto; scrollbar-width: none;
+}
+.tabs a {
+  flex: none; padding: 9px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent;
+  color: var(--muted); text-decoration: none; font-size: 13.5px; white-space: nowrap;
+}
+.tabs a:hover { color: var(--ink); }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 700; }
+.tabs .n { margin-left: 6px; font: 12px var(--num); color: var(--muted); }
+
+.list-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 0; }
+.list-tools .sel { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.list-tools .count { margin-left: auto; font: 13px var(--num); color: var(--muted); }
+
+.table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; }
+.table-scroll.flat { border: 0; border-radius: 0; }
+
+.gun-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.gun-table th {
+  position: sticky; top: 0; z-index: 1; padding: 8px 12px; border-bottom: 1px solid var(--rule);
+  background: var(--bg); color: var(--muted); font-size: 12px; font-weight: 600; text-align: left; white-space: nowrap;
+}
+.gun-table td { padding: 8px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.gun-table tbody tr { cursor: pointer; }
+.gun-table tbody tr:hover td { background: var(--panel); }
+.gun-table .num { text-align: right; font-family: var(--num); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gun-table th.num { font-family: var(--sans); font-size: 12px; }
+.gun-table .num .d { margin-left: 4px; font-size: 13px; color: var(--accent-2); }
+.gun-table .num .wait { color: #5d5852; font-size: 13px; }
+.gun-table .pic-col { width: 128px; padding-right: 0; }
+.gun-table .cal { font-family: var(--num); white-space: nowrap; color: var(--ink-2); }
+.thumb { display: grid; place-items: center; width: 116px; height: 46px; padding: 3px; }
+.gun-name a { color: var(--ink); font-weight: 700; text-decoration: none; }
+.gun-name a:hover { color: var(--accent); }
+.gun-name small { display: block; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.gun-name .m-cal { display: none; }
+
+/* ------------------------------------------------------------ 1 丁のページ */
+
+.gun-head {
+  display: grid; grid-template-columns: minmax(240px, 400px) minmax(0, 1fr); gap: 28px;
+  align-items: center; margin-bottom: 22px;
+}
+.gun-pic { aspect-ratio: 2 / 1; padding: 14px; min-height: 0; }
+.gun-pic img { width: 100%; height: 100%; }
+.spec-line { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 12px 0 0; }
+.spec-line div { display: flex; align-items: baseline; gap: 10px; }
+.spec-line dt { color: var(--muted); font-size: 12.5px; }
+.spec-line dd { margin: 0; font: 16px/1.4 var(--num); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+/* 3 通りのカード。広い画面では 3 列、狭い画面では横に送るカルーセル */
+.build-card {
+  --kc: var(--k-recoil);
+  display: flex; flex-direction: column; gap: 12px; height: 100%;
+  padding: 14px 18px 16px; border: 1px solid var(--rule); border-top: 3px solid var(--kc);
+  border-radius: 6px; background: var(--panel);
+}
+.build-card[data-kind="balanced"] { --kc: var(--k-balanced); }
+.build-card[data-kind="ergo"] { --kc: var(--k-ergo); }
+.build-card h3 { margin: 0; font: 700 15px/1.3 var(--sans); }
+.build-card .why { margin: -8px 0 0; font-size: 12px; color: var(--muted); }
+.big { display: flex; gap: 26px; }
+.big .k { display: block; font-size: 12px; color: var(--muted); }
+.big .v { font: 400 36px/1.05 var(--num); font-variant-numeric: tabular-nums; }
+.big .d { margin-left: 6px; font: 15px/1 var(--num); color: var(--kc); }
+.meters { display: grid; grid-template-columns: auto 1fr 44px; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
+.meters > span:nth-child(3n) { text-align: right; font-family: var(--num); color: var(--ink-2); }
+.meter { height: 5px; border-radius: 3px; background: var(--panel-3); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--kc); }
+.mini { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 13px; }
+.mini dt { color: var(--muted); }
+.mini dd { margin: 0; text-align: right; font: 15px/1.5 var(--num); }
+.mini sup { color: var(--muted); font-size: 10px; }
+
+/* 比べる表 */
+.compare { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.compare th, .compare td { padding: 7px 12px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+.compare thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--panel);
+  color: var(--ink-2); font-size: 12.5px; font-weight: 700; white-space: nowrap;
+}
+.compare thead th:first-child { color: var(--muted); font-weight: 600; }
+.compare .swatch { display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 2px; background: var(--k-recoil); }
+.compare th[data-kind="balanced"] .swatch { background: var(--k-balanced); }
+.compare th[data-kind="ergo"] .swatch { background: var(--k-ergo); }
+.compare tbody th, .compare tfoot th {
+  position: sticky; left: 0; z-index: 1; width: 170px; background: var(--bg);
+  color: var(--muted); font-size: 12.5px; font-weight: 400; white-space: nowrap;
+}
+.compare tbody th { padding-left: calc(12px + var(--d, 0) * 14px); }
+.slot.sub::before { content: '└'; margin-right: 6px; color: #5d5852; }
+.compare tbody tr.differs td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.compare tbody tr.differs th { color: var(--ink-2); }
+.compare.diff-only tbody tr:not(.differs) { display: none; }
+.compare tbody tr:last-child th, .compare tbody tr:last-child td { border-bottom-color: var(--ink-2); }
+.page .part {
+  display: block; padding: 0; border: 0; background: none; cursor: pointer;
+  font: 600 13.5px/1.45 var(--sans); color: var(--ink);
+}
+.page .part:hover { color: var(--accent); }
+.page .part:hover .pn { text-decoration: underline; text-underline-offset: 2px; }
+.part .pm { display: block; font: 400 12.5px/1.5 var(--num); color: var(--muted); }
+.compare td .tag, .parts-list .tag { margin-top: 3px; }
+.compare .none { color: #5d5852; }
+.compare tfoot th, .compare tfoot td { background: var(--panel); border-bottom-color: var(--rule); }
+.compare tfoot td { font: 15px/1.4 var(--num); font-variant-numeric: tabular-nums; }
+.compare tfoot td.best { color: var(--accent-2); font-weight: 600; }
+.compare tfoot td.best::after { content: '最良'; margin-left: 8px; font: 600 10.5px/1 var(--sans); color: var(--accent); vertical-align: 2px; }
+.compare tfoot tr:last-child th, .compare tfoot tr:last-child td { border-bottom: 0; }
+
+/* 配分のスライダー */
+.mixer-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: center; max-width: 680px; margin: 18px 0 10px; }
+.mixer-row .end { font-size: 13px; color: var(--ink-2); }
+.page input[type="range"] { width: 100%; padding: 0; border: 0; background: none; accent-color: var(--accent); }
+.mix-label { font-size: 12.5px; color: var(--muted); margin: 0 0 8px !important; }
+.mix-stats { display: flex; flex-wrap: wrap; gap: 8px 30px; margin-bottom: 10px; }
+.mix-stats .k { display: block; font-size: 12px; color: var(--muted); }
+.mix-stats .v { font: 28px/1.1 var(--num); }
+.mix-stats .d { margin-left: 5px; font: 14px var(--num); color: var(--accent-2); }
+
+.parts-list { margin: 0; padding: 0; list-style: none; }
+.parts-list li {
+  display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 4px 12px; align-items: start;
+  padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 13px;
+}
+.parts-list .slot { padding-left: calc(var(--d, 0) * 14px); color: var(--muted); font-size: 12.5px; }
+.parts-list li > .tag { grid-column: 2; justify-self: start; }
+
+/* ------------------------------------------------------------ アコーディオン */
+
+.acc { border-top: 1px solid var(--rule); }
+.acc:last-of-type { border-bottom: 1px solid var(--rule); }
+.acc > summary {
+  display: flex; align-items: baseline; gap: 12px; padding: 11px 2px;
+  list-style: none; cursor: pointer; font-weight: 600;
+}
+.acc > summary::-webkit-details-marker { display: none; }
+.acc > summary::before { content: '+'; flex: none; width: 12px; font: 600 16px/1 var(--num); color: var(--accent); }
+.acc[open] > summary::before { content: '\2212'; }
+.acc > summary:hover { color: var(--accent); }
+.acc-body { padding: 0 2px 14px 24px; color: var(--ink-2); max-width: 78ch; }
+.mixer .acc { margin-top: 14px; }
+
+/* ------------------------------------------------------------ カルーセル */
+
+.carousel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.carousel-nav { display: flex; gap: 6px; margin-left: auto; }
+.page .carousel-nav button {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 1px solid var(--rule); border-radius: 5px; background: var(--panel); color: var(--ink-2);
+}
+.page .carousel-nav button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.page .carousel-nav button:disabled { opacity: .3; cursor: default; }
+.carousel.static .carousel-nav { visibility: hidden; }
+.carousel-track {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 210px; gap: 12px;
+  overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
+  padding-bottom: 6px; scrollbar-width: thin; scrollbar-color: var(--panel-3) transparent;
+}
+.carousel-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.carousel-item { scroll-snap-align: start; min-width: 0; }
+.carousel-dots { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+.page .carousel-dots button { width: 18px; height: 4px; padding: 0; border: 0; border-radius: 2px; background: var(--panel-3); }
+.page .carousel-dots button[aria-current="true"] { background: var(--accent); }
+
+/* 3 通りのカードは、広い画面ではふつうの 3 列にする */
+.cards .carousel-head { display: none; }
+.cards .carousel-track { grid-auto-columns: minmax(260px, 86%); }
+@media (min-width: 920px) {
+  .cards .carousel-track { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; padding: 0; }
+  .cards .carousel-dots { display: none; }
+}
+
+.recent { margin: 26px 0 0; }
+.same-cal { margin-top: 40px; }
+.same-cal .h-sub small { margin-left: 8px; }
+
+.gun-card {
+  display: flex; flex-direction: column; gap: 4px; height: 100%; padding: 10px 10px 12px;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--panel);
+  color: var(--ink) !important; text-decoration: none;
+}
+.gun-card:hover { border-color: var(--accent); }
+.gun-card .inv { display: grid; place-items: center; height: 84px; padding: 6px; margin-bottom: 4px; }
+.gun-card b { font-size: 14px; }
+.gun-card small { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+/* ------------------------------------------------------------ アイテムの用途 */
+
+.with-side { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; align-items: start; }
+.side { position: sticky; top: 14px; }
+.page .side-h { margin: 0 0 6px; padding: 0 0 6px; font: 600 12.5px/1.5 var(--sans); color: var(--muted); }
+.page .side-h + * + .side-h, .side-checks { margin-top: 0; }
+.side-nav + .side-h { margin-top: 22px !important; }
+.side-nav { display: flex; flex-direction: column; gap: 1px; max-height: 52vh; overflow-y: auto; scrollbar-width: thin; }
+.side-nav a {
+  display: flex; justify-content: space-between; gap: 10px; padding: 5px 10px; border-radius: 4px;
+  color: var(--ink-2); text-decoration: none; font-size: 13px;
+}
+.side-nav a:hover { background: var(--panel); color: var(--ink); }
+.side-nav a[aria-current="page"] { background: var(--panel-2); color: var(--ink); font-weight: 700; box-shadow: inset 2px 0 0 var(--accent); }
+.side-nav .n { font: 12.5px var(--num); color: var(--muted); }
+.side-checks { display: flex; flex-direction: column; gap: 6px; }
+.side-main .list-tools { padding-top: 0; }
+
+.item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.page .item-card {
+  display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel);
+  cursor: pointer; text-align: left;
+}
+.page .item-card:hover { border-color: var(--accent); }
+.item-card .pic { display: grid; place-items: center; width: 66px; height: 66px; padding: 3px; }
+.item-card .txt { display: flex; flex-direction: column; min-width: 0; align-items: flex-start; }
+.item-card .nm { font-size: 13.5px; font-weight: 700; line-height: 1.4; color: var(--ink); }
+.item-card .en { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.5 var(--num); color: var(--muted); }
+.item-card .use { margin-top: 3px; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+.item-card .tag { margin-top: 5px; }
+.item-grid > .empty { grid-column: 1 / -1; }
+
+/* ------------------------------------------------------------ 足もと */
+
+.page-foot { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--muted); }
+.page-foot p { margin: 0 0 4px; }
+
+/* ------------------------------------------------------------ 詳細の小窓 */
+
+dialog.modal {
+  width: min(640px, calc(100vw - 32px)); max-height: min(86vh, 920px); padding: 0;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: var(--ink);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .6); font: 14px/1.7 var(--sans);
+}
+dialog.modal[open] { display: flex; flex-direction: column; }
+dialog.modal::backdrop { background: rgba(6, 8, 9, .72); }
+.modal-frame { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.modal-bar { display: flex; justify-content: flex-end; padding: 8px 8px 0; }
+.modal .modal-close, .site-menu .menu-close {
+  display: grid; place-items: center; width: 34px; height: 34px; padding: 0;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted);
+}
+.modal .modal-close:hover, .site-menu .menu-close:hover { border-color: var(--rule); color: var(--ink); }
+.modal-body { min-height: 0; overflow-y: auto; padding: 0 22px 22px; }
+.modal a { color: var(--accent-2); }
+
+.detail-top { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 16px; align-items: start; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
+.detail-pic { display: grid; place-items: center; width: 108px; height: 108px; padding: 6px; }
+.detail-top h2 { margin: 0 0 2px; font: 700 18px/1.45 var(--sans); }
+.detail-sub { margin: 0 0 8px; font-size: 12.5px; color: var(--muted); }
+.detail-sec { margin-top: 16px; }
+.detail-sec h3 { margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); font: 600 12.5px/1.6 var(--sans); color: var(--muted); }
+.detail-sec h3 small { margin-left: 6px; font-size: 12px; }
+.detail-sec h3 b { color: var(--accent-2); }
+.detail-p { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+.detail-p.muted { color: var(--muted); font-size: 12.5px; }
+.kv { margin: 0; padding: 0; list-style: none; }
+.kv li { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dotted var(--rule); font-size: 13px; }
+.kv li:last-child { border-bottom: 0; }
+.kv b { font: 500 14px/1.5 var(--num); color: var(--accent-2); white-space: nowrap; }
+.kv a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+.kv a:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.detail-links { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 13px; }
+.detail-links:empty { display: none; }
+
+/* ------------------------------------------------------------ 左のメニュー */
+
+.site-menu { position: fixed; inset: 0; z-index: 3000; }
+.site-menu[hidden] { display: none; }
+.site-menu .scrim { position: absolute; inset: 0; background: rgba(6, 8, 9, .6); }
+.site-menu .sheet {
+  position: absolute; top: 0; bottom: 0; left: 0; width: min(340px, 88vw);
+  overflow-y: auto; padding: 12px 18px 28px; background: var(--panel);
+  border-right: 1px solid var(--rule); box-shadow: 12px 0 32px rgba(0, 0, 0, .45);
+  font: 14px/1.6 var(--sans); animation: sheet-in .14s ease-out;
+}
+@keyframes sheet-in { from { transform: translateX(-14px); opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .site-menu .sheet { animation: none; } }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.sheet-head .brand { font: 800 15px/1 var(--sans); letter-spacing: .04em; }
+.menu-sec { padding: 14px 0 12px; border-top: 1px solid var(--rule); }
+.menu-sec h2 { margin: 0 0 2px; font: 700 15px/1.4 var(--sans); }
+.menu-sec h2 a { color: var(--ink); text-decoration: none; }
+.menu-sec h2 a:hover { color: var(--accent); }
+.menu-sec h2 a[aria-current="page"]::after { content: '表示中'; margin-left: 8px; font: 600 11px var(--sans); color: var(--accent); }
+.menu-note { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.menu-maps { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.menu-links { display: flex; flex-direction: column; gap: 1px; }
+.menu-maps a, .menu-links a, .site-menu .menu-links button {
+  display: block; padding: 6px 8px; border: 0; border-radius: 4px; background: none;
+  color: var(--ink-2); text-decoration: none; font: 13.5px/1.5 var(--sans); cursor: pointer;
+}
+.menu-maps a:hover, .menu-links a:hover, .site-menu .menu-links button:hover { background: var(--panel-2); color: var(--ink); }
+.menu-foot { margin: 18px 0 0; font-size: 11.5px; line-height: 1.8; color: var(--muted); }
+
+/* ------------------------------------------------------------ 知らせ */
+
+#toast {
+  position: fixed; left: 50%; bottom: 28px; z-index: 4000; transform: translateX(-50%);
+  padding: 8px 16px; border-radius: 6px; background: var(--ink); color: var(--bg);
+  font: 600 13px/1.5 var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+#toast[hidden] { display: none; }
+
+/* ------------------------------------------------------------ 狭い画面 */
+
+@media (max-width: 860px) {
+  .page-inner { padding: 14px 16px 56px; }
+  .page h1 { font-size: 21px; }
+  .gun-head { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .gun-pic { max-width: 460px; }
+  .cond-note { margin-left: 0; flex-basis: 100%; }
+  .with-side { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .side { position: static; }
+  .side-nav { flex-direction: row; max-height: none; overflow-x: auto; scrollbar-width: none; }
+  .side-nav a { flex: none; border: 1px solid var(--rule); }
+  .side-checks { flex-direction: row; flex-wrap: wrap; gap: 6px 16px; }
+  .gun-table .pic-col { width: 76px; }
+  .thumb { width: 70px; height: 34px; }
+  /* 口径・素のエルゴ・買ったままは隠し、口径は名前の下に出す */
+  .gun-table th:nth-child(3), .gun-table td:nth-child(3),
+  .gun-table th:nth-child(4), .gun-table td:nth-child(4),
+  .gun-table th:nth-child(5), .gun-table td:nth-child(5) { display: none; }
+  .gun-name .full { display: none; }
+  .gun-name .m-cal { display: inline; }
+  .gun-table td, .gun-table th { padding: 8px 6px; }
+  .parts-list li { grid-template-columns: minmax(0, 1fr); }
+  .parts-list li > .tag { grid-column: 1; }
+  .compare tbody th, .compare tfoot th { width: 120px; }
+}

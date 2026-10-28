@@ -43,6 +43,7 @@ SRC_LANG = "https://json.tarkov.dev/regular/maps_{lang}"
 SRC_TASKS = "https://json.tarkov.dev/regular/tasks"
 SRC_TASKS_LANG = "https://json.tarkov.dev/regular/tasks_{lang}"
 SRC_TRADERS = "https://json.tarkov.dev/regular/traders"
+SRC_TRADERS_LANG = "https://json.tarkov.dev/regular/traders_{lang}"
 # 施錠扉が要求する鍵の名前を引くためだけに使う。16MB あるがビルド時のみで、
 # 出力に載るのは実際に参照される 200 件弱の名前だけ。--no-keys で省ける。
 SRC_HIDEOUT = "https://json.tarkov.dev/regular/hideout"
@@ -589,6 +590,315 @@ def build_items(refresh: bool):
           f"ハイドアウト {kinds['h']} / タスク {kinds['t']} / 交換 {kinds['b']} / "
           f"製作 {kinds['c']} / 道具 {kinds['tool']} / FiR {len(fir)}", file=sys.stderr)
     return len(out)
+
+
+# 銃の分類。上流の分類 ID → (URL に使うキー, 表示名)。並びがそのまま画面の並びになる。
+# グレネードランチャーとロケットランチャーは改造する部品が無いので外す。
+GUN_CATEGORIES = [
+    ("5447b5f14bdc2d61278b4567", "assault-rifle", "アサルトライフル"),
+    ("5447b5fc4bdc2d87278b4567", "assault-carbine", "アサルトカービン"),
+    ("5447b5e04bdc2d62278b4567", "smg", "サブマシンガン"),
+    ("5447b6194bdc2d67278b4567", "marksman", "マークスマンライフル"),
+    ("5447b6254bdc2dc3278b4568", "sniper", "スナイパーライフル"),
+    ("5447bed64bdc2d97278b4568", "machinegun", "マシンガン"),
+    ("5447b6094bdc2dc3278b4567", "shotgun", "ショットガン"),
+    ("5447b5cf4bdc2d65278b4567", "pistol", "ハンドガン"),
+    ("617f1ef5e8b54b0998387733", "revolver", "リボルバー"),
+]
+
+# 部品の計算に入れない差し込み口。
+# 照準器・ライト・レーザーは好みで決めるもので、反動にも効かない（エルゴが下がるだけ）。
+# 入れると「最適」がどれも裸の銃に寄ってしまうので、最初から候補にしない。
+# 回転弾倉（camora）は弾そのものが入る口なので部品ではない。
+EXCLUDED_SLOT = re.compile(
+    r"^(mod_scope|mod_tactical|mod_flashlight|mod_launcher|mod_bipod|mod_nvg|camora)")
+
+# 品揃えが固定でない、または特別な条件で開くトレーダー。部品の入手先に数えない。
+# Fence は毎回品揃えが変わる。Lightkeeper は長いタスクの先でしか取引できない。
+EXCLUDED_TRADERS = {"fence", "lightkeeper"}
+
+# 擲弾・信号弾・おもちゃの口径。M32A1 は上流でリボルバーに分類されているので、口径で外す
+EXCLUDED_CALIBERS = {"Caliber40x46", "Caliber40mmRU", "Caliber30x29", "Caliber26x75", "Caliber20x1mm"}
+
+
+def caliber_label(raw: str) -> str:
+    """上流の口径キー（Caliber556x45NATO など）を、ふだん呼ぶ形にする。"""
+    special = {
+        "Caliber1143x23ACP": ".45 ACP", "Caliber86x70": ".338 LM", "Caliber9x33R": ".357 Magnum",
+        "Caliber366TKM": ".366 TKM", "Caliber12g": "12ga", "Caliber20g": "20ga",
+        "Caliber23x75": "23x75mm", "Caliber127x33": ".50 AE", "Caliber762x35": ".300 BLK",
+        "Caliber127x99": ".50 BMG", "Caliber784x49": ".308 ME",
+    }
+    if not raw:
+        return ""
+    if raw in special:
+        return special[raw]
+    m = re.match(r"^Caliber(\d+)x(\d+)([A-Za-z]*)$", raw)
+    if not m:
+        return raw.replace("Caliber", "")
+    a, b, tail = m.groups()
+    # 先頭 1 桁が整数部。556 → 5.56、762 → 7.62、9 → 9、127 → 12.7
+    if len(a) == 1:
+        head = a
+    elif a.startswith("1"):
+        head = a[:2] + ("." + a[2:] if a[2:] else "")
+    else:
+        head = a[0] + "." + a[1:]
+    suffix = "R" if tail == "R" else ""
+    return f"{head}x{b}{suffix}"
+
+
+def build_guns(refresh: bool):
+    """銃と、それに付く部品のデータを作る。おすすめカスタムの計算に使う。
+
+    計算そのものはブラウザでやる。トレーダーのレベルやフリマの有無で
+    答えが変わるので、ここで決め打ちにすると条件を変えられない。
+    ここでは「どの部品がどこに付くか」と、部品ごとの数値・入手先だけを出す。
+
+    相場（フリマの値段）は持たない。items.json と同じ理由で、毎日動くのに
+    このデータは手動ビルドで止まるため。トレーダーの定価だけを持つ。
+    """
+    items_payload = json.loads(fetch(SRC_ITEMS, "items.json", refresh))
+    ija = json.loads(fetch(SRC_ITEMS_LANG.format(lang="ja"), "items_ja.json", refresh))["data"]
+    ien = json.loads(fetch(SRC_ITEMS_LANG.format(lang="en"), "items_en.json", refresh))["data"]
+    barters = json.loads(fetch(SRC_BARTERS, "barters.json", refresh))["data"]
+    traders = json.loads(fetch(SRC_TRADERS, "traders.json", refresh))
+    traders = traders.get("data", traders)
+    tja = json.loads(fetch(SRC_TRADERS_LANG.format(lang="ja"), "traders_ja.json", refresh))["data"]
+
+    items = items_payload["data"]["items"]
+    by_id = items if isinstance(items, dict) else {i["id"]: i for i in items}
+
+    def tr(raw, lang=None):
+        if lang is None:
+            return ija.get(raw) or ien.get(raw) or raw
+        return lang.get(raw) or raw
+
+    # トレーダー。並び順の番号で参照する
+    trader_keys = [k for k, v in traders.items()
+                   if v.get("normalizedName") not in EXCLUDED_TRADERS]
+    trader_keys.sort(key=lambda k: traders[k].get("normalizedName") or "")
+    trader_idx = {k: i for i, k in enumerate(trader_keys)}
+    trader_out = [[traders[k]["normalizedName"],
+                   tja.get(traders[k].get("name"))
+                   or (traders[k].get("normalizedName") or "?").replace("-", " ").title()]
+                  for k in trader_keys]
+
+    cat_of = {cid: key for cid, key, _ in GUN_CATEGORIES}
+    guns_src = []
+    for it in by_id.values():
+        props = it.get("properties") or {}
+        if "gun" not in (it.get("types") or []) or props.get("propertiesType") != "ItemPropertiesWeapon":
+            continue
+        cat = next((cat_of[c] for c in it.get("categories") or [] if c in cat_of), None)
+        if cat and props.get("caliber") not in EXCLUDED_CALIBERS:
+            guns_src.append((it, cat))
+
+    def slots_of(it):
+        out = []
+        for s in (it.get("properties") or {}).get("slots") or []:
+            if EXCLUDED_SLOT.match(s.get("nameId") or ""):
+                continue
+            allowed = [a for a in (s.get("filters") or {}).get("allowedItems") or [] if a in by_id]
+            if allowed:
+                out.append((s["nameId"], bool(s.get("required")), allowed, s.get("name")))
+        return out
+
+    # 銃から辿れる部品を集める
+    reach = set()
+    stack = [a for g, _ in guns_src for _, _, allowed, _ in slots_of(g) for a in allowed]
+    while stack:
+        iid = stack.pop()
+        if iid in reach:
+            continue
+        it = by_id[iid]
+        if (it.get("properties") or {}).get("propertiesType") == "ItemPropertiesAmmo":
+            continue
+        reach.add(iid)
+        stack.extend(a for _, _, allowed, _ in slots_of(it) for a in allowed)
+
+    mod_ids = sorted(reach)
+    mod_idx = {iid: i for i, iid in enumerate(mod_ids)}
+
+    # 差し込み口の表示名。mod_mount_000 のような連番は訳が無いので、末尾を削って探す
+    slot_label = {}
+
+    def label_for(name_id, raw_name):
+        if name_id in slot_label:
+            return
+        key = (raw_name or name_id).upper()
+        while key not in ija and "_" in key[4:]:
+            key = key.rsplit("_", 1)[0]
+        slot_label[name_id] = ija.get(key) or ien.get(key) or name_id
+
+    # 同じ候補の並びが何百回も出てくる（AR-15 系のグリップなど）ので 1 回だけ持つ
+    lists, list_idx = [], {}
+
+    def list_ref(allowed):
+        key = tuple(mod_idx[a] for a in allowed if a in mod_idx)
+        if key not in list_idx:
+            list_idx[key] = len(lists)
+            lists.append(list(key))
+        return list_idx[key]
+
+    def slots_out(it):
+        out = []
+        for name_id, req, allowed, raw in slots_of(it):
+            ref = list_ref(allowed)
+            if not lists[ref]:
+                continue
+            label_for(name_id, raw)
+            out.append([name_id, 1 if req else 0, ref])
+        return out
+
+    def buy_out(it):
+        out = []
+        for b in it.get("buyFromTrader") or []:
+            t = b.get("trader")
+            if t not in trader_idx:
+                continue
+            out.append([trader_idx[t], b.get("minTraderLevel") or 1,
+                        b.get("priceRUB") or 0, 1 if b.get("taskUnlock") else 0])
+        out.sort()
+        return out
+
+    barter_of = {}
+    for b in barters:
+        t = b.get("trader")
+        iid = (b.get("offeredItem") or {}).get("item")
+        if t in trader_idx and iid:
+            barter_of.setdefault(iid, set()).add(
+                (trader_idx[t], b.get("minTraderLevel") or 1, 1 if b.get("taskUnlock") else 0))
+
+    dev_prefix = "https://tarkov.dev/item/"
+    wiki_prefix = "https://escapefromtarkov.fandom.com/wiki/"
+
+    def names(it, o):
+        o["n"] = tr(it.get("name"))
+        short = ija.get(it.get("shortName")) or ien.get(it.get("shortName"))
+        if short and short != o["n"]:
+            o["s"] = short
+        # tarkov.dev のページ。接頭辞は全件同じなので末尾だけ持つ（items.json と同じ形）
+        link = it.get("link") or ""
+        if link.startswith(dev_prefix):
+            o["dev"] = link[len(dev_prefix):]
+
+    def rnd(v, nd=3):
+        v = round(float(v or 0), nd)
+        return int(v) if v == int(v) else v
+
+    mods_out = []
+    for iid in mod_ids:
+        it = by_id[iid]
+        props = it.get("properties") or {}
+        o = {"id": iid}
+        names(it, o)
+        ergo = props.get("ergonomics", it.get("ergonomicsModifier") or 0)
+        # 上流は 2 か所に持っている。上の階層は百分率（-0.5 = -0.5%）、
+        # properties の中は割合（-0.005）。百分率に揃える
+        rec = it.get("recoilModifier")
+        if rec is None:
+            rec = (props.get("recoilModifier") or 0) * 100
+        if ergo:
+            o["e"] = rnd(ergo, 2)
+        if rec:
+            o["r"] = rnd(rec, 2)
+        o["w"] = rnd(it.get("weight"))
+        sl = slots_out(it)
+        if sl:
+            o["sl"] = sl
+        conf = sorted({mod_idx[c] for c in it.get("conflictingItems") or [] if c in mod_idx})
+        if conf:
+            o["x"] = conf
+        b = buy_out(it)
+        if b:
+            o["b"] = b
+        bt = sorted(barter_of.get(iid, ()))
+        if bt:
+            o["bt"] = [list(x) for x in bt]
+        types = it.get("types") or []
+        if "noFlea" not in types:
+            o["fl"] = it.get("minLevelForFlea") or 0
+        if "suppressor" in types:
+            o["sup"] = 1
+        if props.get("capacity"):
+            o["cap"] = props["capacity"]
+        mods_out.append(o)
+
+    # URL に使う短い名前。英語の略称から作る（日本語の略称はカナ混じりのことがある）
+    used_slugs = set()
+
+    def slug_for(it):
+        base = ien.get(it.get("shortName")) or it.get("normalizedName") or it["id"]
+        s = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or it["id"]
+        # 色違いなどで略称が重なるものは、正式名から作った長い名前にする（-2 では区別が付かない）
+        if s in used_slugs:
+            s = it.get("normalizedName") or it["id"]
+        cand, n = s, 2
+        while cand in used_slugs:
+            cand, n = f"{s}-{n}", n + 1
+        used_slugs.add(cand)
+        return cand
+
+    # 標準の構成（プリセット）の ID。銃そのものの画像はレシーバーだけの裸の姿なので、
+    # 組み上がった姿を見せるにはプリセットの画像を使う
+    default_preset = {}
+    for it in by_id.values():
+        props = it.get("properties") or {}
+        if "preset" in (it.get("types") or []) and props.get("default") and props.get("baseItem"):
+            default_preset[props["baseItem"]] = it["id"]
+
+    order = {key: i for i, (_, key, _) in enumerate(GUN_CATEGORIES)}
+    guns_src.sort(key=lambda gc: (order[gc[1]], ien.get(gc[0].get("shortName")) or ""))
+    guns_out = []
+    for it, cat in guns_src:
+        props = it["properties"]
+        sl = slots_out(it)
+        if not sl:
+            continue  # 何も付けられない銃（信号拳銃など）は出さない
+        o = {"id": it["id"], "slug": slug_for(it), "cat": cat}
+        names(it, o)
+        o["cal"] = caliber_label(props.get("caliber"))
+        o["e"] = rnd(props.get("ergonomics"), 2)
+        o["rv"] = props.get("recoilVertical") or 0
+        o["rh"] = props.get("recoilHorizontal") or 0
+        o["w"] = rnd(it.get("weight"))
+        if props.get("fireRate"):
+            o["fr"] = props["fireRate"]
+        wiki = it.get("wikiLink") or ""
+        if wiki.startswith(wiki_prefix):
+            o["wiki"] = wiki[len(wiki_prefix):]
+        if it["id"] in default_preset:
+            o["img"] = default_preset[it["id"]]
+        o["sl"] = sl
+        # 標準の構成（買ったときに付いてくる部品）。トレーダーで売っていない部品でも
+        # 銃を買えば手に入るので、計算では入手できるものとして扱う
+        o["d"] = sorted({mod_idx[c["item"]] for c in it.get("containsItems") or []
+                         if c.get("item") in mod_idx})
+        b = buy_out(it)
+        if b:
+            o["b"] = b
+        guns_out.append(o)
+
+    counts = {}
+    for g in guns_out:
+        counts[g["cat"]] = counts.get(g["cat"], 0) + 1
+    out = {
+        "builtAt": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "categories": [[key, label, counts.get(key, 0)]
+                       for _, key, label in GUN_CATEGORIES if counts.get(key)],
+        "traders": trader_out,
+        "slots": slot_label,
+        "lists": lists,
+        "mods": mods_out,
+        "guns": guns_out,
+    }
+    DATA.mkdir(parents=True, exist_ok=True)
+    write_atomic(DATA / "guns.json", json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+    size = (DATA / "guns.json").stat().st_size
+    print(f"  銃 {len(guns_out)} 丁 / 部品 {len(mods_out)} 点 / 候補の並び {len(lists)} 種 "
+          f"({size/1024:.0f}KB)", file=sys.stderr)
+    return len(guns_out), len(mods_out)
 
 
 def fix_swapped_verbs(payload: dict, ja: dict, en: dict):
@@ -1411,6 +1721,7 @@ def build():
         print(f"  !! ストーリーを取り込めませんでした: {exc}", file=sys.stderr)
         story_count = len(json.loads((DATA / "story.json").read_text(encoding="utf-8")))             if (DATA / "story.json").exists() else 0
     item_count = build_items(args.refresh)
+    gun_count, gun_mod_count = build_guns(args.refresh)
     landmark_counts = build_landmarks(
         args.refresh, api["maps"], interactive, lang_ja, lang_en,
         api.get("mobs") or {}, not args.no_keys,
@@ -1594,6 +1905,9 @@ def build():
     db = {
         "itemFile": "data/items.json" if item_count else None,
         "itemCount": item_count,
+        "gunFile": "data/guns.json" if gun_count else None,
+        "gunCount": gun_count,
+        "gunModCount": gun_mod_count,
         "anyTaskFile": f"data/tasks/{ANY_MAP}.json" if any_count else None,
         "anyTaskCount": any_count,
         "storyFile": "data/story.json" if story_count else None,
@@ -1677,6 +1991,8 @@ def write_readme_summary(db: dict, task_counts: dict, landmark_counts: dict):
         ("名前の付いた地点", f"{lm_total} 件", f"data/landmarks/ {dirsize('data/landmarks'):,} B"),
         ("アイテムの用途", f"{db.get('itemCount', 0)} 種",
          f"data/items.json {size('data/items.json'):,} B"),
+        ("銃と部品", f"{db.get('gunCount', 0)} 丁 / 部品 {db.get('gunModCount', 0)} 点",
+         f"data/guns.json {size('data/guns.json'):,} B"),
         ("メタデータ", "", f"data/mapdb.json {size('data/mapdb.json'):,} B"),
     ]
     table = ["| | | |", "|---|---|---|"]

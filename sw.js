@@ -13,7 +13,7 @@
  * 資産は 2MB ほどしかないので、この方式でも体感は変わらない。
  */
 
-const VERSION = 'eft-gps-20261028-1644';
+const VERSION = 'eft-gps-20261029-0340';
 
 /** 最初に取り込んでおくもの。ここに無いものも、一度読めばキャッシュに入る。 */
 const PRECACHE = [
@@ -35,6 +35,12 @@ const PRECACHE = [
   './src/watch/index.js',
   './src/watch/idb.js',
   './src/app/tasks.js',
+  './site.css',
+  './src/app/site.js',
+  './src/app/router.js',
+  './src/app/ui.js',
+  './src/app/builds.js',
+  './src/app/builds-page.js',
   './items.html',
   './src/app/items-page.js',
   './src/app/items.js',
@@ -62,6 +68,7 @@ self.addEventListener('install', (event) => {
           db?.anyTaskFile,
           db?.storyFile,
           db?.itemFile,
+          db?.gunFile,
         ].filter(Boolean);
         await Promise.all(files.map((f) => cache.add('./' + f).catch(() => {})));
       } catch {

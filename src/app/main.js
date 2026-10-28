@@ -24,6 +24,7 @@ import {
 import {
   loadLandmarks, LAYERS, DEFAULT_ENABLED, layerCount, hazardLabel, bossLabel,
 } from './landmarks.js';
+import { parseHash, hashFor } from './router.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -124,6 +125,9 @@ async function boot() {
   // ?map= ?sample= ?layers= で初期状態を指定できる (動作確認のスクリーンショット用)
   const params = new URLSearchParams(location.search);
   if (params.get('map')) state.selectedKey = params.get('map');
+  // メニューのマップ一覧から来たとき（#/map?m=customs）
+  const fromMenu = parseHash(location.hash).query.get('m');
+  if (fromMenu) state.selectedKey = fromMenu;
   if (params.get('layers')) {
     state.layers = new Set(params.get('layers').split(',').filter(Boolean));
   }
@@ -239,7 +243,32 @@ async function boot() {
       'low',
     );
   }
-  document.title = `EFT 測位クライアント — ${state.selectedKey}`;
+  syncTitle();
+  window.addEventListener('eft:route', onRoute);
+  onRoute({ detail: parseHash(location.hash) });
+}
+
+/**
+ * 地図の画面に来たとき（src/app/site.js が知らせる）。
+ * メニューのマップ一覧は #/map?m=<キー> で来るので、そのマップに切り替えてから
+ * URL を #/map に戻す（戻さないと、再読み込みのたびにそのマップへ戻される）。
+ */
+function onRoute(ev) {
+  const { route, query } = ev.detail;
+  if (route !== 'map') return;
+  const want = query.get('m');
+  if (want) {
+    history.replaceState(null, '', '#/map');
+    if (state.db.byKey.has(want) && want !== state.selectedKey) selectMap(want, { byUser: true });
+  }
+  syncTitle();
+}
+
+/** タブの名前。地図の画面のときだけ、開いているマップを出す */
+function syncTitle() {
+  if (parseHash(location.hash).route === 'map') {
+    document.title = `EFT 測位クライアント — ${state.selectedKey}`;
+  }
 }
 
 /* ------------------------------------------------------------ フロア */
@@ -380,10 +409,10 @@ function renderLandmarks() {
  */
 function setupItems() {
   const inp = $('item-filter');
+  // 一覧は同じページの中の画面なので、同じタブのまま移る（タブが増えていかない）。
+  // 地図の画面は裏に残るので、行き来してもフォルダの監視と現在地はそのまま続く
   const open = () => {
-    const q = inp.value.trim();
-    window.open(q ? `./items.html?q=${encodeURIComponent(q)}` : './items.html',
-      '_blank', 'noopener');
+    location.hash = hashFor('items', [], { q: inp.value.trim() });
   };
   inp.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter') return;
@@ -1537,6 +1566,7 @@ async function selectMap(key, opts = {}) {
   state.selectedKey = key;
   localStorage.setItem('eft-gps.map', key);
   $('map-select').value = key;
+  syncTitle();
   const m = state.db.byKey.get(key);
   const ok = await state.view.setMap(m);
 

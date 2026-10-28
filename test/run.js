@@ -43,6 +43,11 @@ import { switchTag, switchKind } from '../src/app/map.js';
 import {
   loadItems, searchItems, topItems, useKinds, hideoutTotal, useSummary,
 } from '../src/app/items.js';
+import {
+  decodeGuns, bestBuilds, buildAt, stockStats, compareRows, sourceOf, searchGuns,
+  DEFAULT_COND, ERGO_CAP,
+} from '../src/app/builds.js';
+import { parseHash, hashFor } from '../src/app/router.js';
 
 /* ------------------------------------------------------------ ゴールデンデータ */
 
@@ -1276,43 +1281,53 @@ await check('目標の種類に日本語表示がある', () => {
 /* --------------------------------------------------------------------- T28 */
 
 group('T28 アイテムの用途');
-await check('アイテムのページが配信物として揃っている', async () => {
-  // 一覧は情報が多いので items.html に分けた。入口・本体・読み込む JS が
-  // すべて配信されていないと、別タブを開いたときに白い画面になる
-  for (const path of ['../items.html', '../src/app/items-page.js', '../src/app/items.js']) {
+await check('アイテムの画面が配信物として揃っている', async () => {
+  // 一覧はもと items.html という別ページ（別タブで開いていた）だったが、
+  // index.html の中の画面（#/items）に移した。道具を 1 つのタブに集約するため
+  for (const path of ['../src/app/items-page.js', '../src/app/items.js', '../src/app/site.js']) {
     const r = await fetch(path);
     eq(r.status, 200, `${path} が配信されていない`);
   }
-  const page = await fetch('../items.html').then((r) => r.text());
-  truthy(page.includes('./src/app/items-page.js'), 'ページが本体の JS を読んでいない');
-  truthy(page.includes('./index.html'), '地図へ戻る導線が無い');
-  truthy(!/(src|href)="\//.test(page), 'ルート絶対パスの参照がある（サブパス配信で壊れる）');
+  const site = await fetch('../src/app/site.js').then((r) => r.text());
+  truthy(site.includes("import('./items-page.js')"), '画面の切り替えがアイテムの画面を読んでいない');
 
-  // Service Worker が先読みしていないと、オフラインで別タブが開けない
+  // Service Worker が先読みしていないと、オフラインで開けない
   const sw = await fetch('../sw.js').then((r) => r.text());
-  for (const f of ['./items.html', './src/app/items-page.js', './src/app/items.js']) {
+  for (const f of ['./items.html', './src/app/items-page.js', './src/app/items.js', './src/app/site.js']) {
     truthy(sw.includes(`'${f}'`), `${f} がプリキャッシュに無い`);
   }
   truthy(/db\?\.itemFile/.test(sw), 'install で itemFile を拾っていない');
-  return 'ページ・JS・プリキャッシュすべて揃っている';
+  return '画面・JS・プリキャッシュすべて揃っている';
 });
 
-await check('地図側はリンクだけになっている', async () => {
+await check('前の items.html の URL は、同じ検索のまま新しい画面へ送る', async () => {
+  // items.html?q=電線 をブックマークしている人がいる
+  const page = await fetch('../items.html').then((r) => r.text());
+  truthy(page.includes("location.replace('./#/items' + location.search)"), '検索語を引き継いでいない');
+  truthy(!/(src|href)="\//.test(page), 'ルート絶対パスの参照がある（サブパス配信で壊れる）');
+  return 'items.html?q=… → ./#/items?q=…';
+});
+
+await check('地図側は同じページの中で一覧へ移る（別タブを開かない）', async () => {
   // 一覧の体裁を index.html に残したままにすると、二重管理になる
   const page = await fetch('../index.html').then((r) => r.text());
-  truthy(page.includes('./items.html'), '地図側からアイテムのページへ行けない');
+  truthy(page.includes('href="#/items"'), '地図側からアイテムの画面へ行けない');
+  truthy(!page.includes('./items.html'), '別ページへのリンクが残っている');
   for (const dead of ['id="item-hits"', 'id="item-detail"', 'id="btn-item-top"']) {
     truthy(!page.includes(dead), `別ページへ移した要素が残っている: ${dead}`);
   }
   const main = await fetch('../src/app/main.js').then((r) => r.text());
   truthy(!main.includes("from './items.js'"), 'main.js が使わなくなった層を読んでいる');
-  return 'index.html は入口のみ';
+  truthy(!/window\.open\([^)]*items/.test(main), 'まだ別タブで開いている');
+  return 'index.html は入口のみ / 同じタブで移る';
 });
 
 await check('画像の URL がアイテムの ID から組み立てられる', async () => {
   // URL をデータに持たせると 634 件で 50KB 近くになる。ID から作れるので持たない
+  const ui = await fetch('../src/app/ui.js').then((r) => r.text());
+  truthy(/assets\.tarkov\.dev\/\$\{id\}-/.test(ui), 'ID から画像 URL を組み立てていない');
   const js = await fetch('../src/app/items-page.js').then((r) => r.text());
-  truthy(/assets\.tarkov\.dev\/\$\{id\}-/.test(js), 'ID から画像 URL を組み立てていない');
+  truthy(js.includes('itemImage(it.id)'), 'アイテムの画面が組み立て関数を使っていない');
   const data = await fetch('../' + db.itemFile).then((r) => r.json());
   const withUrl = Object.values(data).filter((v) =>
     Object.values(v).some((x) => typeof x === 'string' && x.includes('assets.tarkov.dev')));
@@ -1323,7 +1338,7 @@ await check('画像の URL がアイテムの ID から組み立てられる', a
 
 
 const itemDb = await loadItems('../' + db.itemFile);
-const pageHtml = await fetch('../items.html').then((r) => r.text());
+const pageHtml = await fetch('../index.html').then((r) => r.text());
 const pageJs = await fetch('../src/app/items-page.js').then((r) => r.text());
 
 await check('用途データが読める', () => {
@@ -1470,10 +1485,10 @@ await check('既定の並びで、用途の多いものが上に来る', () => {
 await check('拾うべきかどうかの判断を表に出していない', () => {
   // 判断は押しつけず、何に何個要るかだけを出す
   for (const word of ['必ず拾う', '拾う価値あり', '使い道はある', '優先度']) {
-    truthy(!pageHtml.includes(word), `items.html に「${word}」が残っている`);
+    truthy(!pageHtml.includes(word), `index.html に「${word}」が残っている`);
     truthy(!pageJs.includes(word), `items-page.js に「${word}」が残っている`);
   }
-  truthy(pageHtml.includes('FiR'), 'FiR の表示まで消えている（これは事実なので残す）');
+  truthy(pageJs.includes('FiR'), 'FiR の表示まで消えている（これは事実なので残す）');
   return '判断の文言なし / FiR の表示は残っている';
 });
 
@@ -3006,6 +3021,274 @@ await check('脱出口に階が付いている', () => {
   const customs = db.byKey.get('customs').extracts.find((e) => e.name === 'ZB-1011');
   eq(customs && customs.fl, 'B1', 'ZB-1011 は地下');
   return lab.map((e) => `${e.name}(${e.fl})`).join(', ');
+});
+
+/* --------------------------------------------------------------------- T34 */
+
+group('T34 おすすめカスタムの計算');
+
+const gunRaw = await fetch('../' + db.gunFile).then((r) => r.json());
+const gdb = decodeGuns(gunRaw);
+const allBuilds = new Map(gdb.guns.map((g) => [g.slug, bestBuilds(gdb, g, DEFAULT_COND)]));
+const KIND_KEYS = ['recoil', 'balanced', 'ergo'];
+
+await check('銃と部品のデータが読める', () => {
+  eq(gdb.guns.length, db.gunCount, 'mapdb の銃の数と中身が食い違う');
+  eq(gdb.mods.length, db.gunModCount, 'mapdb の部品の数と中身が食い違う');
+  truthy(gdb.guns.length >= 120, `銃が少なすぎる: ${gdb.guns.length}`);
+  eq(new Set(gdb.guns.map((g) => g.slug)).size, gdb.guns.length, 'URL 名が重複している');
+  truthy(gdb.guns.every((g) => /^[a-z0-9-]+$/.test(g.slug)), 'URL に使えない文字の入った URL 名がある');
+  // 相場は持たない（items.json と同じ方針）。トレーダーの定価だけ
+  const keys = new Set(gdb.mods.flatMap((m) => Object.keys(m)));
+  for (const k of ['lastLowPrice', 'avg24hPrice', 'low24hPrice', 'fleaPrice']) {
+    truthy(!keys.has(k), `相場（${k}）がデータに入っている`);
+  }
+  return `銃 ${gdb.guns.length} 丁 / 部品 ${gdb.mods.length} 点`;
+});
+
+await check('全部の銃で 3 通りが組める', () => {
+  const none = [...allBuilds].filter(([, b]) => !b).map(([s]) => s);
+  eq(none.length, 0, `組めない: ${none.join(', ')}`);
+  return `${allBuilds.size} 丁すべて`;
+});
+
+await check('反動最小 ≤ バランス ≤ エルゴ最大 の順に並ぶ', () => {
+  const bad = [];
+  for (const [slug, b] of allBuilds) {
+    const r = KIND_KEYS.map((k) => b[k].stats.recoil);
+    const e = KIND_KEYS.map((k) => b[k].stats.ergo);
+    if (!(r[0] <= r[1] + 1e-9 && r[1] <= r[2] + 1e-9)) bad.push(`${slug} 反動 ${r.join(' / ')}`);
+    if (!(e[0] <= e[1] + 1e-9 && e[1] <= e[2] + 1e-9)) bad.push(`${slug} エルゴ ${e.join(' / ')}`);
+    if (e.some((x) => x > ERGO_CAP)) bad.push(`${slug} エルゴが上限を超えている`);
+  }
+  eq(bad.length, 0, bad.slice(0, 5).join('; '));
+  return '全銃で順序どおり / エルゴは 100 以下';
+});
+
+await check('買ったままより反動が大きくならない', () => {
+  // 標準の部品はいつでも手に入る扱いなので、反動最小は必ず標準以下になる。
+  // サプレッサー一体型の銃（PB / VSK-94）で、一体型まで外して悪化した不具合の回帰
+  const bad = [];
+  for (const g of gdb.guns) {
+    const st = stockStats(gdb, g);
+    const b = allBuilds.get(g.slug);
+    if (b.recoil.stats.recoil > st.recoil + 1e-9) bad.push(`${g.slug} ${b.recoil.stats.recoil} > ${st.recoil}`);
+  }
+  eq(bad.length, 0, bad.join(', '));
+  return '全銃で標準以下';
+});
+
+/** 組み合わせの中に、同時に付けられない 2 つが入っていないか */
+function conflictsIn(parts) {
+  const ids = new Set(parts.map((p) => p.mod.i));
+  const out = [];
+  for (const p of parts) for (const x of p.mod.conf) if (ids.has(x)) out.push(`${p.mod.s || p.mod.n} × ${gdb.mods[x].s || gdb.mods[x].n}`);
+  return out;
+}
+
+await check('同時に付けられない部品が入っていない', () => {
+  const bad = [];
+  for (const [slug, b] of allBuilds) {
+    for (const k of KIND_KEYS) for (const c of conflictsIn(b[k].parts)) bad.push(`${slug}/${k}: ${c}`);
+  }
+  eq(bad.length, 0, bad.slice(0, 5).join('; '));
+  // M4A1 の CQR（ストック一体型のグリップ）は何十本ものストックとぶつかる。
+  // 片方ずつ外す探索だとここで打ち切られて「組めない」になっていた
+  const m4 = allBuilds.get('m4a1').recoil.parts.map((p) => p.mod.s);
+  truthy(!m4.includes('CQR AR15'), `CQR が残っている: ${m4.join(', ')}`);
+  return `${allBuilds.size} 丁 × 3 通りで衝突なし`;
+});
+
+await check('必須の差し込み口がすべて埋まっている', () => {
+  const bad = [];
+  for (const g of gdb.guns) {
+    for (const k of KIND_KEYS) {
+      const paths = new Set(allBuilds.get(g.slug)[k].parts.map((p) => p.path));
+      for (const [slot, req] of g.sl) if (req && !paths.has(slot)) bad.push(`${g.slug}/${k}: ${slot}`);
+      for (const p of allBuilds.get(g.slug)[k].parts) {
+        for (const [slot, req] of p.mod.sl || []) {
+          if (req && !paths.has(`${p.path}/${slot}`)) bad.push(`${g.slug}/${k}: ${p.path}/${slot}`);
+        }
+      }
+    }
+  }
+  eq(bad.length, 0, bad.slice(0, 5).join('; '));
+  return '空いた必須の口なし';
+});
+
+await check('マガジンは標準と同じ装弾数以上', () => {
+  const bad = [];
+  for (const g of gdb.guns) {
+    const floor = Math.max(0, ...[...g.defaults].map((i) => gdb.mods[i].cap || 0));
+    if (!floor) continue;
+    for (const k of KIND_KEYS) {
+      const mag = allBuilds.get(g.slug)[k].parts.find((p) => p.slot === 'mod_magazine');
+      if (mag && (mag.mod.cap || 0) < floor) bad.push(`${g.slug}/${k}: ${mag.mod.cap} < ${floor}`);
+    }
+  }
+  eq(bad.length, 0, bad.slice(0, 5).join('; '));
+  return '10 発マガジンに逃げていない';
+});
+
+await check('M4A1 の数値が tarkovkit と同じ水準', () => {
+  // 2026-10 時点の tarkovkit.com: 反動最小 −60% / エルゴ 40、エルゴ最大 −47% / エルゴ 100。
+  // 上流の数値はアップデートで動くので、幅を持たせて確かめる
+  const b = allBuilds.get('m4a1');
+  truthy(b.recoil.stats.recoil <= -55 && b.recoil.stats.recoil >= -66, `反動最小 ${b.recoil.stats.recoil}%`);
+  eq(b.ergo.stats.ergo, ERGO_CAP, 'エルゴ最大が 100 に届かない');
+  truthy(b.ergo.stats.recoil <= -40, `エルゴ最大の反動 ${b.ergo.stats.recoil}%`);
+  return `反動最小 ${b.recoil.stats.recoil.toFixed(1)}% エルゴ ${b.recoil.stats.ergo} / `
+    + `エルゴ最大 ${b.ergo.stats.recoil.toFixed(1)}% エルゴ ${b.ergo.stats.ergo}`;
+});
+
+await check('条件を厳しくすると良くはならず、条件の外の部品も入らない', () => {
+  const sample = ['m4a1', 'akm', 'mp5', 'hk-416a5', 'svds', 'm870', 'glock-17'].filter((s) => gdb.bySlug.has(s));
+  for (const slug of sample) {
+    const g = gdb.bySlug.get(slug);
+    const full = allBuilds.get(slug).recoil.stats.recoil;
+    for (const cond of [{ ll: 1, flea: true, suppressor: false }, { ll: 4, flea: false, suppressor: false },
+      { ll: 2, flea: false, suppressor: false }]) {
+      const b = bestBuilds(gdb, g, cond);
+      if (!b) continue; // 厳しい条件では組めない銃もある（それ自体は正しい）
+      truthy(b.recoil.stats.recoil >= full - 1e-9, `${slug} ${JSON.stringify(cond)} で LL4 より良くなった`);
+      for (const k of KIND_KEYS) {
+        for (const p of b[k].parts) {
+          const s = sourceOf(p.mod, cond, g);
+          truthy(s, `${slug} ${p.mod.n} は手に入らないのに入っている`);
+          truthy(cond.flea || s.kind !== 'flea', `${slug} フリマ禁止なのにフリマの部品`);
+          truthy(!s.ll || s.ll <= cond.ll, `${slug} LL${cond.ll} なのに LL${s.ll} の部品`);
+        }
+      }
+    }
+  }
+  return `${sample.join(' / ')}`;
+});
+
+await check('サプレッサーは設定したときだけ入る（一体型は別）', () => {
+  const bad = [];
+  for (const g of gdb.guns) {
+    for (const k of KIND_KEYS) {
+      for (const p of allBuilds.get(g.slug)[k].parts) {
+        if (p.mod.sup && !g.defaults.has(p.mod.i)) bad.push(`${g.slug}: ${p.mod.s || p.mod.n}`);
+      }
+    }
+  }
+  eq(bad.length, 0, bad.slice(0, 5).join('; '));
+  // 使ってよい部品が増えるだけなので、悪くなることは無い。
+  // ただし必ず選ばれるとは限らない。M4A1 では CQB + CRD のマズルブレーキ（−12.5%）のほうが
+  // いちばん効く 5.56 のサプレッサー（−7%）より反動が減るので、許しても選ばれない
+  const sup = { ...DEFAULT_COND, suppressor: true };
+  let picked = 0;
+  const worse = [];
+  for (const g of gdb.guns) {
+    const b = bestBuilds(gdb, g, sup);
+    if (b.recoil.stats.recoil > allBuilds.get(g.slug).recoil.stats.recoil + 1e-9) worse.push(g.slug);
+    if (b.recoil.parts.some((p) => p.mod.sup && !g.defaults.has(p.mod.i))) picked++;
+  }
+  eq(worse.length, 0, `サプレッサーを許して悪くなった: ${worse.join(', ')}`);
+  truthy(picked > 0, 'サプレッサーを許してもどの銃でも選ばれない');
+  return `サプレッサーを許すと ${picked} / ${gdb.guns.length} 丁で反動最小に入る`;
+});
+
+await check('配分を動かすと、反動とエルゴが一方向に動く', () => {
+  const g = gdb.bySlug.get('m4a1');
+  const b = allBuilds.get('m4a1');
+  let prev = null;
+  for (let v = 0; v <= 20; v += 2) {
+    const x = buildAt(gdb, g, DEFAULT_COND, v / 20, b.scale);
+    truthy(x, `t=${v / 20} で組めない`);
+    if (prev) {
+      truthy(x.stats.recoil >= prev.stats.recoil - 1e-9, `t=${v / 20} で反動が逆に減った`);
+      truthy(x.stats.ergo >= prev.stats.ergo - 1e-9, `t=${v / 20} でエルゴが逆に減った`);
+    }
+    prev = x;
+  }
+  const mid = buildAt(gdb, g, DEFAULT_COND, 0.5, b.scale);
+  eq(mid.stats.recoil, b.balanced.stats.recoil, '真ん中がバランスと一致しない');
+  return '0 → 1 で反動は増え、エルゴも増える';
+});
+
+await check('比べる表は、どの部品も 1 回ずつ並べる', () => {
+  for (const slug of ['m4a1', 'ak-74m', 'mp5']) {
+    const b = allBuilds.get(slug);
+    const list = KIND_KEYS.map((k) => b[k]);
+    const rows = compareRows(list);
+    list.forEach((build, col) => {
+      const shown = rows.map((r) => r.cells[col]).filter(Boolean);
+      eq(shown.length, build.parts.length, `${slug} の ${KIND_KEYS[col]} で部品の数が合わない`);
+    });
+    // 子の行は親の行より下にある
+    rows.forEach((r, i) => {
+      const parent = r.path.includes('/') ? r.path.slice(0, r.path.lastIndexOf('/')) : null;
+      if (parent) truthy(rows.findIndex((x) => x.path === parent) < i, `${slug}: ${r.path} が親より上`);
+    });
+  }
+  return 'M4A1 / AK-74M / MP5';
+});
+
+await check('銃を名前と口径で探せる', () => {
+  const norm = (s) => String(s).normalize('NFKC').toLowerCase().replace(/[\s.\-x×]/g, '');
+  truthy(searchGuns(gdb, 'm4a1', norm).some((g) => g.slug === 'm4a1'), 'M4A1 が出ない');
+  const cal = searchGuns(gdb, '7.62x39', norm);
+  truthy(cal.length >= 5 && cal.every((g) => g.cal === '7.62x39'), `口径で引けない: ${cal.length} 件`);
+  eq(searchGuns(gdb, '', norm).length, gdb.guns.length, '空の検索で全件にならない');
+  return `7.62x39 は ${cal.length} 丁`;
+});
+
+/* --------------------------------------------------------------------- T35 */
+
+group('T35 画面の切り替え（地図・カスタム・アイテム）');
+
+await check('URL の # から画面を読む', () => {
+  eq(parseHash('').route, 'map', '空は地図');
+  eq(parseHash('#/nothing').route, 'map', '知らない画面は地図');
+  const g = parseHash('#/builds/m4a1?x=1');
+  eq(g.route, 'builds', '画面');
+  eq(g.parts[0], 'm4a1', '銃');
+  eq(g.query.get('x'), '1', 'クエリ');
+  eq(parseHash('#/items?q=%E9%9B%BB%E7%B7%9A').query.get('q'), '電線', '日本語の検索語');
+  eq(parseHash('#/builds/%E0%A4').parts[0], '%E0%A4', '壊れた % でも落ちない');
+  return 'map / builds / items';
+});
+
+await check('URL を組み立てて読み戻すと同じになる', () => {
+  const h = hashFor('items', [], { q: '電線 テープ', cat: '', use: 'h,t', sort: null });
+  truthy(!h.includes('cat=') && !h.includes('sort='), `空の値が URL に載っている: ${h}`);
+  const back = parseHash(h);
+  eq(back.route, 'items', '画面');
+  eq(back.query.get('q'), '電線 テープ', '検索語');
+  eq(back.query.get('use'), 'h,t', '絞り込み');
+  eq(hashFor('builds', ['m4a1']), '#/builds/m4a1', '銃のページ');
+  eq(hashFor('map', [], { m: 'customs' }), '#/map?m=customs', 'メニューのマップ');
+  return h;
+});
+
+await check('index.html がサイトの枠を持っている', async () => {
+  const html = await fetch('../index.html').then((r) => r.text());
+  truthy(html.includes('href="./site.css"'), 'site.css を読んでいない');
+  truthy(html.includes('src="./src/app/site.js"'), 'site.js を読んでいない');
+  for (const id of ['site-nav', 'btn-menu', 'site-menu', 'view-map', 'view-builds', 'view-items', 'modal', 'toast']) {
+    truthy(html.includes(`id="${id}"`), `#${id} が無い`);
+  }
+  truthy(/<dialog id="modal"/.test(html), '詳細の小窓が <dialog> でない（Esc やフォーカスの戻りを自前で作ることになる）');
+  // 地図の操作部品は、地図以外の画面で隠す
+  for (const id of ['map-tabs', 'btn-open-tasks', 'btn-open-settings']) {
+    truthy(new RegExp(`id="${id}"[^>]*data-only="map"`).test(html), `#${id} が地図専用になっていない`);
+  }
+  // 外部の CDN は使わない（オフラインで動かすため）
+  truthy(!/(src|href)="https?:\/\/(?!tarkov\.dev|escapefromtarkov)/.test(html), '外部のファイルを読んでいる');
+  return '帯・メニュー・3 画面・小窓・知らせ';
+});
+
+await check('新しい部品が配信物とプリキャッシュに揃っている', async () => {
+  const sw = await fetch('../sw.js').then((r) => r.text());
+  for (const f of ['./site.css', './src/app/site.js', './src/app/router.js', './src/app/ui.js',
+    './src/app/builds.js', './src/app/builds-page.js']) {
+    truthy(sw.includes(`'${f}'`), `${f} がプリキャッシュに無い`);
+    eq((await fetch('../' + f.slice(2))).status, 200, `${f} が配信されていない`);
+  }
+  truthy(/db\?\.gunFile/.test(sw), 'install で gunFile を拾っていない');
+  return '6 ファイル + 銃のデータ';
 });
 
 /* -------------------------------------------------------------------- 出力 */
