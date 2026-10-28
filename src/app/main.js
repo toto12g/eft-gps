@@ -1541,8 +1541,9 @@ async function selectMap(key, opts = {}) {
   const ok = await state.view.setMap(m);
 
   $('map-missing').hidden = ok;
-  $('attrib').textContent =
-    m.tarkovDev && m.tarkovDev.svgPath ? 'map: the-hideout/tarkov-dev-svg-maps (CC BY-NC-SA 4.0)' : '';
+  // 出典はマップごと。SVG 地図集に無いマップは別の作者の地図を使っている
+  $('attrib').textContent = m.credit
+    || (m.tarkovDev && m.tarkovDev.svgPath ? 'map: the-hideout/tarkov-dev-svg-maps (CC BY-NC-SA 4.0)' : '');
   $('build-stamp').textContent = state.db.builtAt
     ? `データ ${state.db.builtAt}`
     : 'データの版が不明（古い可能性があります）';

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 1260">
+  <!-- map: re3mr (re3mr.com, CC BY-NC-SA 4.0)。切り出して縮小した（tools/make_raster_maps.py） -->
+  <g id="Bridge_Roof"><image href="maps/icebreaker/Bridge_Roof.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Bridge"><image href="maps/icebreaker/Bridge.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Stairs_blocked"><image href="maps/icebreaker/Stairs_blocked.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Officers_Deck"><image href="maps/icebreaker/Officers_Deck.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Accommodation_upper"><image href="maps/icebreaker/Accommodation_upper.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Accommodation_mid"><image href="maps/icebreaker/Accommodation_mid.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Accommodation_lower"><image href="maps/icebreaker/Accommodation_lower.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Gym_Canteen"><image href="maps/icebreaker/Gym_Canteen.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Helipad"><image href="maps/icebreaker/Helipad.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Infirmary"><image href="maps/icebreaker/Infirmary.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Storage_Security"><image href="maps/icebreaker/Storage_Security.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Fuel_Pumps"><image href="maps/icebreaker/Fuel_Pumps.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Engine_Room"><image href="maps/icebreaker/Engine_Room.webp" x="0" y="0" width="250" height="1260"/></g>
+  <g id="Lower_Automation"><image href="maps/icebreaker/Lower_Automation.webp" x="0" y="0" width="250" height="1260"/></g>
+</svg>

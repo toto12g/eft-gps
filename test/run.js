@@ -654,11 +654,31 @@ await check('The Lab が校正済みで、脱出口が図に収まる', () => {
   return `脱出口 ${inside}/${(m.extracts || []).length} / POI ${pct.toFixed(1)}% が枠内`;
 });
 
-await check('地図画像のあるマップが 11 になった', () => {
+await check('全 13 マップに地図画像がある', () => {
+  // Labyrinth と Icebreaker は SVG 地図集に無いので re3mr の地図を使う（tools/make_raster_maps.py）
   const withMap = db.maps.filter((m) => m.svg && m.affine);
-  eq(withMap.length, 11, `地図つきマップ: ${withMap.map((m) => m.key).join(', ')}`);
-  const without = db.maps.filter((m) => !m.svg).map((m) => m.key);
-  return `${withMap.length} マップに地図あり / 残り ${without.join(', ')}（上流に SVG 素材が無い）`;
+  eq(withMap.length, 13, `地図つきマップ: ${withMap.map((m) => m.key).join(', ')}`);
+  for (const key of ['the-labyrinth', 'icebreaker']) {
+    const m = db.byKey.get(key);
+    truthy(/re3mr/.test(m.credit || ''), `${key} に地図の出典が無い`);
+    eq(m.calib && m.calib.poiInside, 1, `${key} の POI が地図からはみ出している`);
+  }
+  return `${withMap.length} マップに地図あり`;
+});
+
+await check('Icebreaker の甲板ごとに地図が切り替わる', async () => {
+  const m = db.byKey.get('icebreaker');
+  eq(m.tarkovDev.layers.length, 14, '甲板の数');
+  const svg = await fetch('../' + m.svg).then((r) => r.text());
+  for (const L of m.tarkovDev.layers) {
+    truthy(svg.includes(`id="${L.svgLayer}"`), `${L.name} の甲板が SVG に無い`);
+  }
+  // 地図の画像が実在する（SVG は index.html からの相対パスで画像を指す）
+  const hrefs = [...svg.matchAll(/href="([^"]+)"/g)].map((x) => x[1]);
+  for (const h of hrefs) eq((await fetch('../' + h)).status, 200, `${h} が無い`);
+  const heli = m.extracts.find((e) => e.name === 'Helicopter');
+  eq(heli.fl, 'Lv2', 'ヘリポートの階');
+  return `${hrefs.length} 枚の甲板画像`;
 });
 
 await check('mapdb が svgFiles を返している（校正ツールの素材一覧）', () => {
@@ -1940,10 +1960,13 @@ await check('方位ローズが「北が上」の地図で真上を向く', () =
     const d = Math.min(deg, 360 - deg); // 画面上(0°)からのずれ
     if (d > 1) off.push(`${m.key} ${d.toFixed(1)}°`);
   }
-  // reserve だけは地図自体が 195° 回して描かれているので 15° 傾く
-  eq(off.length, 1, `北が上でない地図が増えた: ${off.join(', ')}`);
-  truthy(off[0].startsWith('reserve'), `想定外の傾き: ${off[0]}`);
-  return `1 枚を除き真上（例外: ${off[0]}）`;
+  // reserve は地図自体が 195° 回して描かれているので 15° 傾く。
+  // the-labyrinth は地図（tarkov.dev・re3mr とも）がゲーム内の方位から 90° 回って
+  // 描かれている（tarkov.dev の描画の回転 270° に対し、ゲームの北は 180°）
+  const known = ['reserve', 'the-labyrinth'];
+  const unexpected = off.filter((o) => !known.some((k) => o.startsWith(k + ' ')));
+  eq(unexpected.length, 0, `北が上でない地図が増えた: ${unexpected.join(', ')}`);
+  return `例外 ${off.length} 枚を除き真上（${off.join(', ')}）`;
 });
 
 await check('レイド時間と方位の基準が mapdb に出ている', () => {

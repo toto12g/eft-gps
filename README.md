@@ -498,16 +498,16 @@ Service Worker は**ネットワーク優先・キャッシュ退避**にして�
 <!-- data:begin -->
 | | | |
 |---|---|---|
-| マップ | 13（地図画像あり 11） |  |
+| マップ | 13（地図画像あり 13） |  |
 | POI | 16,203 点 | data/poi.bin 97,218 B |
 | 脱出口 | 145 箇所 |  |
 | タスク | 延べ 790 件（うちマップ非依存 171） | data/tasks/ 594,228 B |
 | ストーリー | 10 章（Wiki から。地点データなし） | data/story.json 39,962 B |
 | 名前の付いた地点 | 3593 件 | data/landmarks/ 252,161 B |
 | アイテムの用途 | 635 種 | data/items.json 272,970 B |
-| メタデータ |  | data/mapdb.json 64,774 B |
+| メタデータ |  | data/mapdb.json 65,576 B |
 
-生成 2026-10-23 01:51 / スキーマ v2
+生成 2026-10-28 16:44 / スキーマ v2
 <!-- data:end -->
 
 ## 状態
@@ -532,6 +532,10 @@ Service Worker は**ネットワーク優先・キャッシュ退避**にして�
 （CC BY-NC-SA 4.0）を使うため、全体を **CC BY-NC-SA 4.0** とする。非商用・クレジット表示・
 同ライセンスでの公開が条件。ゲーム内レーダーや ESP オーバーレイでの利用は素材側で明確に
 禁止されている。
+
+Labyrinth と Icebreaker の地図は SVG 地図集に無いため、[re3mr](https://re3mr.com) の地図
+（CC BY-NC-SA 4.0）を切り出して縮小したもの（`maps/labyrinth/`, `maps/icebreaker/`）を使う。
+作り直すときは `py tools/make_raster_maps.py`。Icebreaker は甲板ごとに切り出して、フロアとして切り替える。
 
 マップメタデータは [the-hideout/tarkov-dev](https://github.com/the-hideout/tarkov-dev)（MIT）
 と [tarkov.dev API](https://tarkov.dev/) より。メインストーリーの章と目標文（`data/story.json`）は

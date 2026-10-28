@@ -24,5 +24,250 @@
     "points": [],
     "svgLayer": "First_Level",
     "note": "自動位置合わせは First_Level に対して行ったので、基準レイヤもここに固定する"
+  },
+  "the-labyrinth": {
+    "svg": "maps/Labyrinth.svg",
+    "svgViewBox": [
+      0,
+      0,
+      1920,
+      1770
+    ],
+    "affine": {
+      "a": 0.40078461,
+      "b": 16.78119685,
+      "c": 630.382355,
+      "d": 16.52028705,
+      "e": 0.1609759,
+      "f": 895.466825
+    },
+    "rms": null,
+    "fit": {
+      "method": "control-points",
+      "points": 7,
+      "residualPx": [
+        14,
+        7,
+        31,
+        14,
+        13,
+        12,
+        13
+      ]
+    },
+    "points": [],
+    "svgLayer": "Main",
+    "credit": "map: re3mr (re3mr.com, CC BY-NC-SA 4.0)",
+    "note": "re3mr の地図。警報スイッチ 5 か所と脱出口 2 か所で合わせた（tools/make_raster_maps.py）"
+  },
+  "icebreaker": {
+    "svg": "maps/Icebreaker.svg",
+    "svgViewBox": [
+      0,
+      0,
+      250,
+      1260
+    ],
+    "affine": {
+      "a": -7.2,
+      "b": 0.0,
+      "c": 127.316,
+      "d": 0.0,
+      "e": 7.2,
+      "f": 646.416
+    },
+    "rms": null,
+    "fit": {
+      "method": "anchor+overlap",
+      "overlap": 0.841
+    },
+    "points": [],
+    "svgLayer": "Infirmary",
+    "credit": "map: re3mr (re3mr.com, CC BY-NC-SA 4.0)",
+    "layers": [
+      {
+        "name": "Lv10 Bridge Roof",
+        "svgLayer": "Bridge_Roof",
+        "label": "Lv10",
+        "extents": [
+          {
+            "height": [
+              43.8,
+              10000
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv9 Bridge",
+        "svgLayer": "Bridge",
+        "label": "Lv9",
+        "extents": [
+          {
+            "height": [
+              40.7,
+              43.7
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv8 Stairs (blocked)",
+        "svgLayer": "Stairs_blocked",
+        "label": "Lv8",
+        "extents": [
+          {
+            "height": [
+              37.6,
+              40.6
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv7 Officers' Deck",
+        "svgLayer": "Officers_Deck",
+        "label": "Lv7",
+        "extents": [
+          {
+            "height": [
+              34.5,
+              37.5
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv6 Accommodation (upper)",
+        "svgLayer": "Accommodation_upper",
+        "label": "Lv6",
+        "extents": [
+          {
+            "height": [
+              31.4,
+              34.4
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv5 Accommodation (mid)",
+        "svgLayer": "Accommodation_mid",
+        "label": "Lv5",
+        "extents": [
+          {
+            "height": [
+              28.3,
+              31.3
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv4 Accommodation (lower)",
+        "svgLayer": "Accommodation_lower",
+        "label": "Lv4",
+        "extents": [
+          {
+            "height": [
+              25.3,
+              28.2
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv3 Gym / Canteen",
+        "svgLayer": "Gym_Canteen",
+        "label": "Lv3",
+        "extents": [
+          {
+            "height": [
+              22.2,
+              25.2
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv2 Helipad",
+        "svgLayer": "Helipad",
+        "label": "Lv2",
+        "extents": [
+          {
+            "height": [
+              19.57,
+              22.1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv1 Infirmary",
+        "svgLayer": "Infirmary",
+        "label": "Lv1",
+        "extents": [
+          {
+            "height": [
+              18.92,
+              19.56
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv0 Storage / Security",
+        "svgLayer": "Storage_Security",
+        "label": "Lv0",
+        "extents": [
+          {
+            "height": [
+              15,
+              18.93
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv-1 Fuel Pumps",
+        "svgLayer": "Fuel_Pumps",
+        "label": "Lv-1",
+        "extents": [
+          {
+            "height": [
+              8.8,
+              14.9
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv-2 Engine Room",
+        "svgLayer": "Engine_Room",
+        "label": "Lv-2",
+        "extents": [
+          {
+            "height": [
+              3.6,
+              8.7
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lv-3 Lower Automation",
+        "svgLayer": "Lower_Automation",
+        "label": "Lv-3",
+        "extents": [
+          {
+            "height": [
+              -10000,
+              3.5
+            ]
+          }
+        ]
+      }
+    ],
+    "note": "re3mr の地図。甲板ごとに同じ枠で切り出した（tools/make_raster_maps.py）"
   }
 }

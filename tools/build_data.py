@@ -1079,6 +1079,13 @@ EXTRACT_SWITCHES = {
         "ZB-1013": ["ZB-013 Power Switch"],
     },
 }
+# 脱出口の階を、高さからの判定ではなく名指しで決めるもの。
+# Icebreaker のヘリポートは脱出範囲の中心（22.56m）が甲板の範囲（〜22.1m）を少し超え、
+# 1 つ上の Lv3 と判定される。地図（re3mr）ではヘリポートは Lv2。
+# 範囲の床の高さで判定する案は、Streets の Expo Checkpoint が B1 になるなど逆効果だった
+EXTRACT_FLOOR_FIX = {
+    ("icebreaker", "Helicopter"): "Lv2",
+}
 # 脱出口からこれ以内のスイッチは、その場で押すもの（呼び出しボタン）なので印を付けない (m)
 SWITCH_AT_EXTRACT_M = 6.0
 
@@ -1109,6 +1116,8 @@ def floor_label(td, x, y, z):
                 best = (L, lo, hi - lo)
     if best is None:
         return "1F"
+    if best[0].get("label"):
+        return best[0]["label"]
     name = best[0].get("name") or ""
     m = re.match(r"^(\d+)(?:st|nd|rd|th) Floor$", name)
     if m:
@@ -1128,7 +1137,7 @@ def annotate_extracts(entry: dict, switches: list, td):
     for e in entry.get("extracts") or []:
         p = e.get("position")
         if p:
-            fl = floor_label(td, p["x"], p["y"], p["z"])
+            fl = EXTRACT_FLOOR_FIX.get((entry["key"], e.get("name"))) or floor_label(td, p["x"], p["y"], p["z"])
             if fl:
                 e["fl"] = fl
         names = table.get(e.get("name"))
@@ -1569,7 +1578,13 @@ def build():
                 ],
             },
         }
-        annotate_extracts(entry, m.get("switches") or [], td)
+        # 手動校正がフロアの定義を持っていれば置き換える（Icebreaker: re3mr の甲板 14 枚）
+        if ov and ov.get("layers") and entry["tarkovDev"]:
+            entry["tarkovDev"]["layers"] = ov["layers"]
+        # 地図の出典。SVG 地図集以外の地図を使うマップだけが持つ
+        if ov and ov.get("credit"):
+            entry["credit"] = ov["credit"]
+        annotate_extracts(entry, m.get("switches") or [], entry.get("tarkovDev"))
         maps_out.append(entry)
 
     DATA.mkdir(parents=True, exist_ok=True)
