@@ -46,7 +46,7 @@ import {
 import {
   decodeGuns, bestBuilds, buildAt, stockStats, compareRows, sourceOf, searchGuns, buildStats,
   treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, encodeTree, decodeTree,
-  rawWeight, traderLL, DEFAULT_COND, ERGO_CAP,
+  rawWeight, traderLL, ammoFor, DEFAULT_COND, ERGO_CAP,
 } from '../src/app/builds.js';
 import { parseHash, hashFor } from '../src/app/router.js';
 
@@ -3364,6 +3364,44 @@ await check('部品に、持ち物の画面と同じ画像が付く', async () =
   truthy(!gunRaw.mods.some((m) => Object.values(m).some((v) => typeof v === 'string' && v.includes('assets.tarkov.dev'))),
     'データに画像の URL が入っている');
   return '表・選ぶ小窓とも、ID から tarkov.dev の画像を出す';
+});
+
+group('T37 撃てる弾の表');
+
+await check('銃ごとに、撃てる弾が並ぶ', () => {
+  eq(gdb.ammo.length, db.gunAmmoCount, 'mapdb の弾の数と中身が食い違う');
+  const none = gdb.guns.filter((g) => !(g.am || []).length).map((g) => g.slug);
+  eq(none.length, 0, `弾の無い銃: ${none.join(', ')}`);
+  const m4ammo = ammoFor(gdb, m4).map((a) => a.s);
+  for (const want of ['M995', 'M855A1', 'M855', 'FMJ']) truthy(m4ammo.includes(want), `M4A1 に ${want} が無い: ${m4ammo.join(', ')}`);
+  // 口径ではなく、その銃の受ける弾で並べる（口径の違う弾が混ざらない）
+  truthy(!m4ammo.includes('BS'), '5.56 の銃に 7.62 の弾が混ざっている');
+  return `M4A1: ${m4ammo.join(' / ')}`;
+});
+
+await check('並び替えの向きと、散弾の粒', () => {
+  const pen = ammoFor(gdb, m4, 'pen').map((a) => a.pen);
+  truthy(pen.every((v, i) => i === 0 || pen[i - 1] >= v), `貫通が大きい順になっていない: ${pen.join(',')}`);
+  const rec = ammoFor(gdb, m4, 'r').map((a) => a.r || 0);
+  truthy(rec.every((v, i) => i === 0 || rec[i - 1] <= v), `反動が小さい順になっていない: ${rec.join(',')}`);
+  const m870 = ammoFor(gdb, gdb.bySlug.get('m870'), 'dmg');
+  truthy(m870.some((a) => a.pc > 1), '12ga の散弾に粒の数が無い');
+  // ダメージは 1 粒あたり × 粒の数で比べる
+  const total = m870.map((a) => a.dmg * (a.pc || 1));
+  truthy(total.every((v, i) => i === 0 || total[i - 1] >= v), 'ダメージが粒の数を掛けた順になっていない');
+  return `M870 のいちばん重い弾: ${m870[0].s} ${m870[0].dmg}${m870[0].pc ? `×${m870[0].pc}` : ''}`;
+});
+
+await check('弾の入手先も部品と同じ規則で決まる', () => {
+  // 2026-10 のデータ: M856A1 は Peacekeeper LL4 で現金。M995 はどこでも売っていない（拾うか作るだけ）
+  const ammo = ammoFor(gdb, m4);
+  const a = ammo.find((x) => x.s === 'M856A1');
+  const at4 = sourceOf(a, { ...DEFAULT_COND, flea: false }, null);
+  truthy(at4 && at4.kind === 'trader' && at4.ll === 4, `M856A1 が LL4 のトレーダーで買えない: ${JSON.stringify(at4)}`);
+  eq(sourceOf(a, { ...DEFAULT_COND, ll: 3, flea: false }, null), null, 'M856A1 が LL3 で買えてしまう');
+  const m995 = ammo.find((x) => x.s === 'M995');
+  truthy(!(m995.b || m995.bt || m995.fl !== undefined), 'M995 に入手先がある（「店売りなし」の扱いを見直す）');
+  return `M856A1: ${gdb.traders[at4.t].name} LL${at4.ll} / M995: 店売りなし`;
 });
 
 /* --------------------------------------------------------------------- T35 */

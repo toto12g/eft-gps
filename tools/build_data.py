@@ -825,6 +825,42 @@ def build_guns(refresh: bool):
             o["cap"] = props["capacity"]
         mods_out.append(o)
 
+    # 弾。銃ごとに撃てるもの（上流の allowedAmmo）を表にする。口径で合わせると、
+    # 同じ口径でも込められない弾（12ga のスラッグを受けない銃など）まで並んでしまう
+    ammo_ids = sorted({a for g, _ in guns_src for a in (g.get("properties") or {}).get("allowedAmmo") or []
+                       if a in by_id})
+    ammo_idx = {iid: i for i, iid in enumerate(ammo_ids)}
+    ammo_out = []
+    for iid in ammo_ids:
+        it = by_id[iid]
+        p = it.get("properties") or {}
+        o = {"id": iid}
+        names(it, o)
+        o["dmg"] = p.get("damage") or 0
+        if (p.get("projectileCount") or 1) > 1:
+            o["pc"] = p["projectileCount"]  # 散弾の粒の数。ダメージは 1 粒あたり
+        o["pen"] = p.get("penetrationPower") or 0
+        o["ad"] = p.get("armorDamage") or 0
+        o["fg"] = round((p.get("fragmentationChance") or 0) * 100)
+        o["v"] = p.get("initialSpeed") or 0
+        # 反動の補正。上の階層は百分率（5 = +5%）、properties の中は割合
+        rec = it.get("recoil")
+        if rec is None:
+            rec = (p.get("recoilModifier") or 0) * 100
+        if rec:
+            o["r"] = rnd(rec, 1)
+        if p.get("tracer"):
+            o["tr"] = 1
+        b = buy_out(it)
+        if b:
+            o["b"] = b
+        bt = sorted(barter_of.get(iid, ()))
+        if bt:
+            o["bt"] = [list(x) for x in bt]
+        if "noFlea" not in (it.get("types") or []):
+            o["fl"] = it.get("minLevelForFlea") or 0
+        ammo_out.append(o)
+
     # URL に使う短い名前。英語の略称から作る（日本語の略称はカナ混じりのことがある）
     used_slugs = set()
 
@@ -875,6 +911,7 @@ def build_guns(refresh: bool):
         # 銃を買えば手に入るので、計算では入手できるものとして扱う
         o["d"] = sorted({mod_idx[c["item"]] for c in it.get("containsItems") or []
                          if c.get("item") in mod_idx})
+        o["am"] = [ammo_idx[a] for a in props.get("allowedAmmo") or [] if a in ammo_idx]
         b = buy_out(it)
         if b:
             o["b"] = b
@@ -891,14 +928,15 @@ def build_guns(refresh: bool):
         "slots": slot_label,
         "lists": lists,
         "mods": mods_out,
+        "ammo": ammo_out,
         "guns": guns_out,
     }
     DATA.mkdir(parents=True, exist_ok=True)
     write_atomic(DATA / "guns.json", json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     size = (DATA / "guns.json").stat().st_size
-    print(f"  銃 {len(guns_out)} 丁 / 部品 {len(mods_out)} 点 / 候補の並び {len(lists)} 種 "
-          f"({size/1024:.0f}KB)", file=sys.stderr)
-    return len(guns_out), len(mods_out)
+    print(f"  銃 {len(guns_out)} 丁 / 部品 {len(mods_out)} 点 / 弾 {len(ammo_out)} 種 / "
+          f"候補の並び {len(lists)} 種 ({size/1024:.0f}KB)", file=sys.stderr)
+    return len(guns_out), len(mods_out), len(ammo_out)
 
 
 def fix_swapped_verbs(payload: dict, ja: dict, en: dict):
@@ -1721,7 +1759,7 @@ def build():
         print(f"  !! ストーリーを取り込めませんでした: {exc}", file=sys.stderr)
         story_count = len(json.loads((DATA / "story.json").read_text(encoding="utf-8")))             if (DATA / "story.json").exists() else 0
     item_count = build_items(args.refresh)
-    gun_count, gun_mod_count = build_guns(args.refresh)
+    gun_count, gun_mod_count, gun_ammo_count = build_guns(args.refresh)
     landmark_counts = build_landmarks(
         args.refresh, api["maps"], interactive, lang_ja, lang_en,
         api.get("mobs") or {}, not args.no_keys,
@@ -1908,6 +1946,7 @@ def build():
         "gunFile": "data/guns.json" if gun_count else None,
         "gunCount": gun_count,
         "gunModCount": gun_mod_count,
+        "gunAmmoCount": gun_ammo_count,
         "anyTaskFile": f"data/tasks/{ANY_MAP}.json" if any_count else None,
         "anyTaskCount": any_count,
         "storyFile": "data/story.json" if story_count else None,
@@ -1991,7 +2030,7 @@ def write_readme_summary(db: dict, task_counts: dict, landmark_counts: dict):
         ("名前の付いた地点", f"{lm_total} 件", f"data/landmarks/ {dirsize('data/landmarks'):,} B"),
         ("アイテムの用途", f"{db.get('itemCount', 0)} 種",
          f"data/items.json {size('data/items.json'):,} B"),
-        ("銃と部品", f"{db.get('gunCount', 0)} 丁 / 部品 {db.get('gunModCount', 0)} 点",
+        ("銃と部品", f"{db.get('gunCount', 0)} 丁 / 部品 {db.get('gunModCount', 0)} 点 / 弾 {db.get('gunAmmoCount', 0)} 種",
          f"data/guns.json {size('data/guns.json'):,} B"),
         ("メタデータ", "", f"data/mapdb.json {size('data/mapdb.json'):,} B"),
     ]

@@ -81,7 +81,7 @@ export function mount(el) {
 
 export async function show(el, ctx) {
   if (!state.items) {
-    el.innerHTML = '<div class="page-inner"><p class="loading">アイテムのデータを読み込んでいます…</p></div>';
+    el.innerHTML = '<div class="page-inner"><p class="loading">読み込み中…</p></div>';
     try {
       const meta = await loadMeta();
       const items = await loadItems(meta.itemFile);
@@ -133,8 +133,7 @@ function render() {
     ])}
     <header class="page-head">
       <h1>${state.cat ? esc(state.cat) : 'アイテムの用途'}</h1>
-      <p class="lede">ハイドアウト・タスク・トレーダーとの交換・製作の 4 つを横断して、アイテムの側から
-        「どこで何個使うか」を引けるようにしたものです。拾うかどうかの判断は入れていません。数を見て決めてください。</p>
+      <p class="lede">ハイドアウト・タスク・交換・製作で、どこに何個使うか。</p>
     </header>
     <div class="with-side">
       <aside class="side" aria-label="絞り込み">
@@ -143,7 +142,7 @@ function render() {
           ${catLink('', 'すべて', state.list.length)}
           ${state.cats.map(([name, n]) => catLink(name, name, n)).join('')}
         </nav>
-        <h2 class="side-h">用途で絞る</h2>
+        <h2 class="side-h">用途</h2>
         <div class="side-checks">
           ${USES.map(([k, label]) => `<label class="check"><input type="checkbox" data-use="${k}"
               ${state.uses.has(k) ? 'checked' : ''}><span>${label}</span></label>`).join('')}
@@ -152,7 +151,7 @@ function render() {
       <div class="side-main">
         <div class="list-tools">
           <input type="search" id="item-q" value="${esc(state.query)}" autocomplete="off"
-                 placeholder="アイテム名で探す（電線 / wires / ｹｸﾃｰﾌﾟ …）" aria-label="アイテム名で探す">
+                 placeholder="電線 / wires / ｹｸﾃｰﾌﾟ …" aria-label="アイテム名で探す">
           <label class="sel">並び
             <select id="item-sort">${SORTS.map(([k, label]) =>
               `<option value="${k}"${state.sort === k ? ' selected' : ''}>${label}</option>`).join('')}</select>
@@ -164,9 +163,8 @@ function render() {
       </div>
     </div>
     <footer class="page-foot">
-      <p>データ元 <a href="https://tarkov.dev/" target="_blank" rel="noopener noreferrer">tarkov.dev</a>（画像を含む）。
-        個数は「どの段階で何個要るか」をそのままの形で出しています。</p>
-      <p>相場は毎日動くので、このページでは持たずに tarkov.dev の該当ページへ送っています。そちらなら常に最新の値が出ます。</p>
+      <p>データ・画像: <a href="https://tarkov.dev/" target="_blank" rel="noopener noreferrer">tarkov.dev</a>。
+        相場は毎日動くので持っていない（各アイテムから tarkov.dev へ）。</p>
       <p>非公式のファンツールです。Battlestate Games とは無関係で、承認も受けていません。</p>
     </footer>
   </div>`;
@@ -207,10 +205,9 @@ function renderGrid() {
   if (!rows.length) {
     empty.hidden = false;
     empty.innerHTML = state.query.trim()
-      ? `「${esc(state.query.trim())}」に一致するアイテムはありません。<br>`
-        + 'ゲーム内の表示名か英語名で探してください。'
-        + `用途が分かっているのは、ハイドアウト・タスク・交換・製作に出てくる ${state.list.length} 種だけです。`
-      : '絞り込みに一致するアイテムがありません。';
+      ? `「${esc(state.query.trim())}」は該当なし。ゲーム内の名前か英語名で。`
+        + `<br>※載っているのは、ハイドアウト・タスク・交換・製作に出てくる ${state.list.length} 種だけ`
+      : '該当なし。';
     return;
   }
   empty.hidden = true;
@@ -223,7 +220,7 @@ function renderGrid() {
   if (rows.length > LIMIT) {
     const more = document.createElement('p');
     more.className = 'empty';
-    more.textContent = `ほか ${rows.length - LIMIT} 種。検索か絞り込みで減らしてください。`;
+    more.textContent = `ほか ${rows.length - LIMIT} 種（検索か絞り込みで）`;
     grid.appendChild(more);
   }
 }
@@ -300,15 +297,14 @@ function openDetail(id) {
     section('製作の道具として使う', undefined,
       (it.tool || []).map(([st, lv, prod]) => [`${st} Lv${lv} → ${prod}`, '減らない'])) +
     (it.out ? `<section class="detail-sec"><h3>自分で作れる</h3>
-       <p class="detail-p">ハイドアウトの製作 ${it.out} 通りで手に入ります。</p></section>` : '') +
-    (useKinds(it) === 0 ? '<p class="detail-p">登録された用途はありません。</p>' : '') +
+       <p class="detail-p">ハイドアウトで作れる（${it.out} 通り）</p></section>` : '') +
+    (useKinds(it) === 0 ? '<p class="detail-p">用途の登録なし</p>' : '') +
     (it.fir
-      ? '<p class="detail-p muted">レイド発見品（FiR）が要るものはフリーマーケットで買えません。'
-        + '見つけたその場で拾う必要があります。</p>'
+      ? '<p class="detail-p muted">※FiR はフリマで買えない。レイドで拾うこと</p>'
       : '') +
     '<div class="detail-links">' +
-    (it.dev ? `<a href="${DEV}${esc(it.dev)}" target="_blank" rel="noopener noreferrer">tarkov.dev で現在の相場を見る</a>` : '') +
-    (it.w ? `<a href="${WIKI}${esc(it.w)}" target="_blank" rel="noopener noreferrer">Wiki で詳しく見る</a>` : '') +
+    (it.dev ? `<a href="${DEV}${esc(it.dev)}" target="_blank" rel="noopener noreferrer">tarkov.dev（相場）</a>` : '') +
+    (it.w ? `<a href="${WIKI}${esc(it.w)}" target="_blank" rel="noopener noreferrer">Wiki</a>` : '') +
     '</div>',
   );
 }

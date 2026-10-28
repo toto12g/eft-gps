@@ -56,6 +56,8 @@ export function decodeGuns(raw) {
     slotLabel: raw.slots,
     lists: raw.lists,
     mods,
+    // 弾。入手先は部品と同じ形（b / bt / fl）なので sourceOf がそのまま使える
+    ammo: (raw.ammo || []).map((a, i) => ({ ...a, i })),
     guns,
     bySlug: new Map(guns.map((g) => [g.slug, g])),
     byId: new Map(mods.map((m) => [m.id, m])),
@@ -740,6 +742,19 @@ export function rawWeight(t, scale) {
   const ke = t / scale.dE;
   const kr = (1 - t) / scale.dR;
   return ke / (ke + kr);
+}
+
+/**
+ * その銃で撃てる弾を、並べ替えて返す。
+ * @param {'pen'|'dmg'|'ad'|'fg'|'v'|'r'} key 並べる値。反動（r）だけは小さい順、ほかは大きい順
+ */
+export function ammoFor(db, gun, key = 'pen') {
+  const val = (a) => (key === 'dmg' ? a.dmg * (a.pc || 1) : a[key] || 0);
+  const dir = key === 'r' ? 1 : -1;
+  return (gun.am || [])
+    .map((i) => db.ammo[i])
+    .filter(Boolean)
+    .sort((a, b) => dir * (val(a) - val(b)) || b.pen - a.pen);
 }
 
 /** 同じ口径の銃。自分は除く。 */
