@@ -779,7 +779,7 @@ function renderObjectives() {
   const box = $('task-objectives');
   box.innerHTML = '';
   if (!state.activeTask) {
-    box.innerHTML = '<div class="hint-line">「タスクを選ぶ」から選ぶと、目標と距離がここに並びます。</div>';
+    box.innerHTML = '<div class="hint-line">タスクを選ぶと、目標と距離がここに並ぶ</div>';
     return;
   }
 
@@ -1179,8 +1179,8 @@ function setPlacing(on) {
   const hint = $('pin-hint');
   hint.classList.toggle('on', on);
   hint.textContent = on
-    ? 'オン。地図をクリックするたびに刺さります。ドラッグでの移動と拡大はそのまま使えます。もう一度押すか Esc で終了。'
-    : 'ピンを置くを押してから地図をクリックします。';
+    ? 'オン。クリックした所に刺さる（ドラッグと拡大はそのまま）。もう一度押すか Esc で終了'
+    : '※「ピンを置く」を押してから地図をクリック';
 }
 
 function renderPins() {
