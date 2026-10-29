@@ -46,7 +46,7 @@ import {
 import {
   decodeGuns, bestBuilds, buildAt, stockStats, compareRows, sourceOf, searchGuns, buildStats,
   treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, encodeTree, decodeTree,
-  rawWeight, traderLL, ammoFor, DEFAULT_COND, ERGO_CAP,
+  rawWeight, traderLL, ammoFor, condForLevel, DEFAULT_COND, ERGO_CAP,
 } from '../src/app/builds.js';
 import { parseHash, hashFor } from '../src/app/router.js';
 
@@ -3382,6 +3382,32 @@ await check('部品に、持ち物の画面と同じ画像が付く', async () =
   truthy(!gunRaw.mods.some((m) => Object.values(m).some((v) => typeof v === 'string' && v.includes('assets.tarkov.dev'))),
     'データに画像の URL が入っている');
   return '表・選ぶ小窓とも、ID から tarkov.dev の画像を出す';
+});
+
+await check('プレイヤー Lv で、使える部品が絞られる', () => {
+  const mech = gdb.traders.findIndex((t) => t.key === 'mechanic');
+  const c5 = condForLevel(gdb, 5, DEFAULT_COND);
+  eq(c5.lv[mech], 1, 'Lv5 の Mechanic は LL1');
+  eq(condForLevel(gdb, 40, DEFAULT_COND).lv[mech], 4, 'Lv40 の Mechanic は LL4');
+  const b5 = bestBuilds(gdb, m4, c5);
+  for (const k of KIND_KEYS) {
+    for (const p of b5[k].parts) {
+      const s = p.source;
+      truthy(s.kind !== 'flea', `Lv5 なのにフリマの部品: ${p.mod.n}`);
+      if (s.kind === 'trader' || s.kind === 'barter') {
+        truthy(gdb.traders[s.t].levels[s.ll - 1] <= 5, `Lv5 で上がれない LL の部品: ${p.mod.n}`);
+        truthy(!(s.questLevel > 5), `Lv5 で解放されていないタスクの品物: ${p.mod.n}`);
+      }
+    }
+  }
+  // レベルが上がるほど良くなる（悪くはならない）
+  let prev = null;
+  for (const lv of [5, 10, 15, 20, 30, 40]) {
+    const r = bestBuilds(gdb, m4, condForLevel(gdb, lv, DEFAULT_COND)).recoil.stats.recoil;
+    if (prev !== null) truthy(r <= prev + 1e-9, `Lv${lv} で Lv が下のときより悪い`);
+    prev = r;
+  }
+  return `M4A1 反動最小: Lv5 ${b5.recoil.stats.recoil.toFixed(1)}% → Lv40 ${prev.toFixed(1)}%`;
 });
 
 group('T37 撃てる弾の表');

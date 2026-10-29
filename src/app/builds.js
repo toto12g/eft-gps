@@ -52,7 +52,9 @@ export function decodeGuns(raw) {
   return {
     builtAt: raw.builtAt,
     categories: raw.categories.map(([key, label, count]) => ({ key, label, count })),
-    traders: raw.traders.map(([key, name]) => ({ key, name })),
+    // levels は LL1〜LL4 に要るプレイヤーレベル
+    traders: raw.traders.map(([key, name, levels]) => ({ key, name, levels: levels || [] })),
+    fleaLevel: raw.fleaLevel || 15,
     slotLabel: raw.slots,
     lists: raw.lists,
     mods,
@@ -81,6 +83,22 @@ export const ERGO_CAP = 100;
 /** そのトレーダーの LL。トレーダーごとの指定が無ければ共通の LL */
 export const traderLL = (cond, t) => (cond.lv && cond.lv[t] !== undefined ? cond.lv[t] : cond.ll);
 
+/**
+ * プレイヤーレベルから条件を作る。
+ *   トレーダーの LL  そのレベルで上がれるいちばん上（信頼度と取引額の条件は満たしているとみなす）
+ *   フリマ           fleaLevel（15）から。部品ごとの「Lv○○ から」も sourceOf で見る
+ *   タスクで解放     解放のタスクを受けられるレベル（前提のタスクも含む）から
+ * @param {Object} base フリマ・サプレッサー・予算はここから引き継ぐ
+ */
+export function condForLevel(db, level, base = DEFAULT_COND) {
+  const lv = db.traders.map((t) => {
+    let ll = 0;
+    t.levels.forEach((need, i) => { if (need <= level) ll = i + 1; });
+    return ll;
+  });
+  return { ...base, ll: 4, lv, level, fleaLevel: db.fleaLevel };
+}
+
 /* ------------------------------------------------------------ 入手先 */
 
 /**
@@ -94,26 +112,33 @@ export const traderLL = (cond, t) => (cond.lv && cond.lv[t] !== undefined ? cond
  */
 export function sourceOf(mod, cond, gun) {
   if (gun && gun.defaults.has(mod.i)) return { kind: 'stock' };
-  const cash = (mod.b || []).filter(([t, ll]) => ll <= traderLL(cond, t));
+  // 4 つ目はタスクで解放されるときの解放レベル（0 なら解放条件なし）。
+  // レベルを決めていないときは、タスクは終えているものとして扱う
+  const open = ([t, ll, , q]) => ll <= traderLL(cond, t) && !(cond.level && q > cond.level);
+  const cash = (mod.b || []).filter(open);
   if (cash.length) {
     // 低い LL で買えるほうを優先。同じなら安いほう
     const [t, ll, price, quest] = cash.slice().sort((x, y) => x[1] - y[1] || x[2] - y[2])[0];
-    return { kind: 'trader', t, ll, price, quest: !!quest };
+    return { kind: 'trader', t, ll, price, quest: !!quest, questLevel: quest };
   }
   if (cond.budget) return null;
-  const barter = (mod.bt || []).filter(([t, ll]) => ll <= traderLL(cond, t));
+  const barter = (mod.bt || []).filter(([t, ll, q]) => open([t, ll, 0, q]));
   if (barter.length) {
     const [t, ll, quest] = barter.slice().sort((x, y) => x[1] - y[1])[0];
-    return { kind: 'barter', t, ll, quest: !!quest };
+    return { kind: 'barter', t, ll, quest: !!quest, questLevel: quest };
   }
-  if (cond.flea && mod.fl !== undefined) return { kind: 'flea', level: mod.fl };
+  if (cond.flea && mod.fl !== undefined) {
+    // レベルを決めたときは、フリマそのものの解放（Lv15）と部品ごとの解放の両方を見る
+    const fleaOk = !cond.level || (cond.level >= (cond.fleaLevel || 15) && mod.fl <= cond.level);
+    if (fleaOk) return { kind: 'flea', level: mod.fl };
+  }
   return null;
 }
 
 /** 条件を 1 本の文字列にする。計算の結果を条件ごとに覚えておくのに使う */
 export function condKey(cond) {
   return [cond.ll, cond.flea ? 1 : 0, cond.suppressor ? 1 : 0, cond.budget || 0,
-    cond.lv ? cond.lv.join('') : ''].join('|');
+    cond.lv ? cond.lv.join('') : '', cond.level || 0].join('|');
 }
 
 /* ------------------------------------------------------------ 計算 */

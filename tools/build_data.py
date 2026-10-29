@@ -711,10 +711,35 @@ def build_guns(refresh: bool):
                    if v.get("normalizedName") not in EXCLUDED_TRADERS]
     trader_keys.sort(key=lambda k: traders[k].get("normalizedName") or "")
     trader_idx = {k: i for i, k in enumerate(trader_keys)}
+    # 4 つ目は LL ごとに要るプレイヤーレベル（LL1, LL2, …）。レベル別のおすすめに使う。
+    # 信頼度（rep）と取引額の条件もあるが、プレイヤーごとに違うので満たしているとみなす
     trader_out = [[traders[k]["normalizedName"],
                    tja.get(traders[k].get("name"))
-                   or (traders[k].get("normalizedName") or "?").replace("-", " ").title()]
+                   or (traders[k].get("normalizedName") or "?").replace("-", " ").title(),
+                   [lv.get("requiredPlayerLevel") or 0
+                    for lv in sorted(traders[k].get("levels") or [], key=lambda lv: lv.get("level") or 0)]]
                   for k in trader_keys]
+
+    # タスクで解放される品物は、そのタスクを受けられるレベルを「解放レベル」とする。
+    # タスク自体の必要レベルが 0 でも、前提のタスクに必要レベルがあることが多いので、
+    # 前提をたどって最大をとる（35 件はタスク自体が 0）。最低でも 1（0 だと「解放条件なし」と区別できない）
+    tasks_payload = json.loads(fetch(SRC_TASKS, "tasks.json", refresh))
+    task_list = tasks_payload["data"]["tasks"]
+    task_by_id = {t["id"]: t for t in (task_list.values() if isinstance(task_list, dict) else task_list)}
+    unlock_memo = {}
+
+    def unlock_level(tid, depth=0):
+        if not tid or tid not in task_by_id:
+            return 1 if tid else 0
+        if tid in unlock_memo:
+            return unlock_memo[tid]
+        t = task_by_id[tid]
+        lv = t.get("minPlayerLevel") or 0
+        if depth < 40:
+            for req in t.get("taskRequirements") or []:
+                lv = max(lv, unlock_level((req or {}).get("task"), depth + 1))
+        unlock_memo[tid] = max(lv, 1)
+        return unlock_memo[tid]
 
     cat_of = {cid: key for cid, key, _ in GUN_CATEGORIES}
     guns_src = []
@@ -790,7 +815,7 @@ def build_guns(refresh: bool):
             if t not in trader_idx:
                 continue
             out.append([trader_idx[t], b.get("minTraderLevel") or 1,
-                        b.get("priceRUB") or 0, 1 if b.get("taskUnlock") else 0])
+                        b.get("priceRUB") or 0, unlock_level(b.get("taskUnlock"))])
         out.sort()
         return out
 
@@ -800,7 +825,7 @@ def build_guns(refresh: bool):
         iid = (b.get("offeredItem") or {}).get("item")
         if t in trader_idx and iid:
             barter_of.setdefault(iid, set()).add(
-                (trader_idx[t], b.get("minTraderLevel") or 1, 1 if b.get("taskUnlock") else 0))
+                (trader_idx[t], b.get("minTraderLevel") or 1, unlock_level(b.get("taskUnlock"))))
 
     dev_prefix = "https://tarkov.dev/item/"
     wiki_prefix = "https://escapefromtarkov.fandom.com/wiki/"
@@ -957,6 +982,8 @@ def build_guns(refresh: bool):
         "categories": [[key, label, counts.get(key, 0)]
                        for _, key, label in GUN_CATEGORIES if counts.get(key)],
         "traders": trader_out,
+        # フリマを使えるプレイヤーレベル。部品ごとの「Lv○○ から」は各部品の fl
+        "fleaLevel": ((items_payload["data"].get("fleaMarket") or {}).get("minPlayerLevel") or 15),
         "slots": slot_label,
         "lists": lists,
         "mods": mods_out,

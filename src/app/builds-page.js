@@ -11,7 +11,7 @@
 
 import {
   loadGuns, bestBuilds, buildAt, stockStats, compareRows, sameCaliber, searchGuns,
-  lowestRecoil, sourceOf, buildStats, condKey, traderLL, rawWeight, ammoFor,
+  lowestRecoil, sourceOf, buildStats, condKey, traderLL, rawWeight, ammoFor, condForLevel,
   treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, encodeTree, decodeTree,
   DEFAULT_COND, ERGO_CAP,
 } from './builds.js';
@@ -47,6 +47,9 @@ const AMMO_SORT = [['pen', '貫通'], ['dmg', 'ダメージ'], ['ad', 'アーマ
 /** 貫通の棒の幅の上限。アーマークラス 6 の目安（60）より少し上まで */
 const PEN_MAX = 70;
 
+/** レベル別の表に並べるプレイヤーレベル。トレーダーの LL が上がる辺り（6〜42）を 5 刻みで */
+const LEVELS = [5, 10, 15, 20, 25, 30, 35, 40, 45];
+
 /** メニューに並べるトレーダーの順。ゲーム内の並びに合わせ、残りは名前順 */
 const TRADER_ORDER = ['prapor', 'therapist', 'skier', 'peacekeeper', 'mechanic', 'ragman', 'jaeger', 'ref'];
 
@@ -81,6 +84,9 @@ const state = {
   tlOpen: false,
   /** 弾の表の並び */
   ammoSort: 'pen',
+  /** レベル別の表。銃と条件ごとに覚える */
+  levelCache: new Map(),
+  levelJob: 0,
   /** 一覧の「最小反動」の列。条件ごとに覚えておく */
   lowCache: new Map(),
   lowJob: 0,
@@ -154,9 +160,17 @@ function sellersOf(db) {
   return [...has].sort((a, b) => rank(a) - rank(b) || db.traders[a].name.localeCompare(db.traders[b].name));
 }
 
+/** レベル別の表と「プレイヤー Lv」に共通する、レベル以外の条件 */
+function baseCond() {
+  const s = state.store;
+  return { ll: s.ll, flea: !!s.flea, suppressor: !!s.suppressor, budget: Number(s.budget) || 0 };
+}
+
 function runtimeCond() {
   const s = state.store;
-  const cond = { ll: s.ll, flea: !!s.flea, suppressor: !!s.suppressor, budget: Number(s.budget) || 0 };
+  const cond = baseCond();
+  // プレイヤー Lv を決めたら、LL・フリマ・タスクの解放はそこから決める
+  if (state.db && s.level) return condForLevel(state.db, s.level, cond);
   const tl = s.tl || {};
   if (state.db && Object.keys(tl).length) {
     cond.lv = state.db.traders.map((t) => (tl[t.key] !== undefined ? tl[t.key] : s.ll));
@@ -178,8 +192,11 @@ function condBar() {
       <span class="seg" role="group" aria-label="${esc(tr.name)} の LL">${seg('data-tl', tr.key, cur)}</span></div>`;
   }).join('');
   return `<div class="cond" role="group" aria-label="計算の条件">
+      <label class="cond-item budget"><span class="k">プレイヤー Lv</span>
+        <input type="number" id="plevel" min="1" max="79" inputmode="numeric" placeholder="なし"
+               value="${s.level || ''}" aria-label="プレイヤーレベル"></label>
       <span class="cond-item"><span class="k" id="ll-label">トレーダー LL</span>
-        <span class="seg" role="group" aria-labelledby="ll-label">${seg('data-ll', '', custom.length ? 0 : s.ll)}</span></span>
+        <span class="seg" role="group" aria-labelledby="ll-label">${seg('data-ll', '', s.level || custom.length ? 0 : s.ll)}</span></span>
       <label class="cond-item check"><input type="checkbox" data-cond="flea" ${s.flea ? 'checked' : ''}
         ${s.budget ? 'disabled' : ''}><span>フリマ</span></label>
       <label class="cond-item check"><input type="checkbox" data-cond="suppressor" ${s.suppressor ? 'checked' : ''}>
@@ -187,12 +204,14 @@ function condBar() {
       <label class="cond-item budget"><span class="k">予算</span>
         <input type="number" id="budget" min="0" step="10000" inputmode="numeric" placeholder="なし"
                value="${s.budget || ''}" aria-label="部品代の上限（ルーブル）"><span class="unit">₽</span></label>
-      <details class="cond-more" ${state.tlOpen || custom.length ? 'open' : ''}>
-        <summary>個別に${custom.length
+      <details class="cond-more" ${state.tlOpen || (custom.length && !s.level) ? 'open' : ''}>
+        <summary>個別に${custom.length && !s.level
           ? `<span class="cond-note">（${custom.map(([k, v]) => `${esc(names.get(k) || k)} ${v}`).join('・')}）</span>` : ''}</summary>
         <div class="tl-grid">${rows}</div>
         <p class="cond-note">※左の LL を押すと個別の設定は消える</p>
       </details>
+      ${s.level ? `<p class="cond-note wide">※Lv${s.level} で上がれる LL・使えるフリマ・解放済みのタスクの品物だけで組む（信頼度は足りている前提）。
+        LL を押すと Lv の指定は消える</p>` : ''}
       ${s.budget ? '<p class="cond-note wide">※予算ありのときはフリマ・交換を使わない（値段を持っていないため）。銃本体は含まない</p>' : ''}
     </div>`;
 }
@@ -435,6 +454,7 @@ function renderGun(slug) {
           items: KINDS.map((k) => buildCard(k, b[k.key])),
         })}
       </section>
+      ${levelSection()}
       <section aria-labelledby="h-parts">
         <h2 id="h-parts">部品の比較
           <label class="check h-tool"><input type="checkbox" id="diff-only"><span>差分だけ</span></label></h2>
@@ -484,7 +504,62 @@ function renderGun(slug) {
     renderMix();
     fillPoints();
   }
+  fillLevels();
   renderBuilder();
+}
+
+/* ------------------------------------------------------------ レベル別 */
+
+function levelSection() {
+  const cur = state.store.level;
+  const head = KINDS.map((k) => `<th scope="col" data-kind="${k.key}"><span class="swatch"></span>${esc(k.label)}</th>`).join('');
+  return `<section aria-labelledby="h-level">
+    <h2 id="h-level">レベル別 <small>※そのレベルで買える部品だけで組んだもの</small></h2>
+    <div class="table-scroll">
+      <table class="lvl">
+        <thead><tr><th scope="col">プレイヤー Lv</th>${head}<th scope="col">フリマ</th></tr></thead>
+        <tbody>${LEVELS.map((lv) => `<tr data-lv="${lv}" class="${cur === lv ? 'cur' : ''}" tabindex="0"
+            aria-label="Lv${lv} の条件で見る">
+          <th scope="row">Lv${lv}</th>
+          <td colspan="4" class="wait">…</td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+/** 1 行ぶんの中身。縦反動と補正、エルゴ */
+function levelCells(lv, b) {
+  if (!b) return '<td colspan="3" class="wait">組めない（必須の部品が手に入らない）</td><td>—</td>';
+  const cell = (x) => `<td><span class="lv-rv">${x.stats.rv}</span> <span class="d">${signed(x.stats.recoil)}%</span>
+    <span class="lv-e">エルゴ ${trim1(x.stats.ergo)}</span></td>`;
+  const flea = state.store.flea && lv >= state.db.fleaLevel ? '使える' : '—';
+  return KINDS.map((k) => cell(b[k.key])).join('') + `<td class="flea-col">${flea}</td>`;
+}
+
+/**
+ * レベル別の表を、画面を止めないよう 1 行ずつ埋める。
+ * 1 行で 3 通りを解くので M4A1 で 0.1 秒ほど。9 行なら 1 秒弱
+ */
+function fillLevels() {
+  const job = ++state.levelJob;
+  const gun = state.gun;
+  const key = `${gun.slug}|${condKey(baseCond())}`;
+  if (!state.levelCache.has(key)) state.levelCache.set(key, new Map());
+  const done = state.levelCache.get(key);
+  const paint = (lv) => {
+    const row = state.el.querySelector(`tr[data-lv="${lv}"]`);
+    if (row) row.innerHTML = `<th scope="row">Lv${lv}</th>${levelCells(lv, done.get(lv))}`;
+  };
+  const todo = LEVELS.filter((lv) => !done.has(lv));
+  LEVELS.filter((lv) => done.has(lv)).forEach(paint);
+  const step = () => {
+    if (job !== state.levelJob || state.gun !== gun || !todo.length) return;
+    const lv = todo.shift();
+    done.set(lv, bestBuilds(state.db, gun, condForLevel(state.db, lv, baseCond())));
+    paint(lv);
+    setTimeout(step, 0);
+  };
+  setTimeout(step, 0);
 }
 
 function gunHead(gun, cat) {
@@ -577,7 +652,7 @@ function sourceTag(src, never = false) {
   const tr = (i) => esc(state.db.traders[i].name);
   switch (src.kind) {
     case 'stock': return '<span class="tag stock">標準</span>';
-    case 'trader': return `<span class="tag${src.quest ? ' quest' : ''}"${src.quest ? ' title="タスクを終えると買えるようになる"' : ''}>${tr(src.t)} LL${src.ll}${src.quest ? ' ・ 要タスク' : ''}</span>`;
+    case 'trader': return `<span class="tag${src.quest ? ' quest' : ''}"${src.quest ? ' title="タスクを終えると買えるようになる"' : ''}>${tr(src.t)} LL${src.ll}${src.quest ? ` ・ 要タスク${src.questLevel > 1 ? ` Lv${src.questLevel}` : ''}` : ''}</span>`;
     case 'barter': return `<span class="tag barter">${tr(src.t)} LL${src.ll} 交換</span>`;
     case 'flea': return `<span class="tag flea">フリマ${src.level ? ` Lv${src.level}〜` : ''}</span>`;
     default: return '';
@@ -988,10 +1063,10 @@ function openPart(i) {
   const where = [];
   if (gun && gun.defaults.has(m.i)) where.push(['この銃の標準部品', '']);
   for (const [t, ll, price, quest] of m.b || []) {
-    where.push([`${tr(t)} LL${ll}${quest ? '（要タスク）' : ''}`, rub(price)]);
+    where.push([`${tr(t)} LL${ll}（Lv${state.db.traders[t].levels[ll - 1] || 1}〜）${quest ? `・要タスク${quest > 1 ? ` Lv${quest}〜` : ''}` : ''}`, rub(price)]);
   }
   for (const [t, ll, quest] of m.bt || []) {
-    where.push([`${tr(t)} LL${ll} 交換${quest ? '（要タスク）' : ''}`, '']);
+    where.push([`${tr(t)} LL${ll}（Lv${state.db.traders[t].levels[ll - 1] || 1}〜）交換${quest ? `・要タスク${quest > 1 ? ` Lv${quest}〜` : ''}` : ''}`, '']);
   }
   where.push(m.fl !== undefined
     ? [`フリマ${m.fl ? `（Lv${m.fl}〜）` : ''}`, '相場は tarkov.dev']
@@ -1053,6 +1128,7 @@ function openHelp() {
       'マガジンは標準と同じ装弾数以上から（自分で組むときはどれでも可）',
       '同時に付けられない部品は tarkov.dev の相性データで避ける。データの漏れはゲーム内で確かめて',
       '「個別に」で決めたトレーダーはその LL、ほかは左の LL まで',
+      'プレイヤー Lv を決めると、トレーダーの LL はそのレベルで上がれるところまで（信頼度・取引額は足りている前提）。フリマは Lv15 から、部品ごとの解放レベルも見る。タスクで解放される品物は、そのタスク（前提のタスクを含む）を受けられるレベルから',
       '予算は部品代だけ。値段で少しずつ安い部品へ寄せて探すので、予算ちょうどの最良とは限らない（必ず収まる）',
     ])}</section>`);
 }
@@ -1095,13 +1171,13 @@ function onClick(ev) {
   const ll = ev.target.closest('[data-ll]');
   if (ll) {
     // 全員まとめての LL。個別の設定は消す
-    setStore({ ll: Number(ll.dataset.ll), tl: {} });
+    setStore({ ll: Number(ll.dataset.ll), tl: {}, level: 0 });
     return;
   }
   const tl = ev.target.closest('[data-tl]');
   if (tl) {
     state.tlOpen = true;
-    setStore({ tl: { ...(state.store.tl || {}), [tl.dataset.tr]: Number(tl.dataset.tl) } });
+    setStore({ tl: { ...(state.store.tl || {}), [tl.dataset.tr]: Number(tl.dataset.tl) }, level: 0 });
     return;
   }
   const part = ev.target.closest('.part[data-mod]');
@@ -1125,6 +1201,12 @@ function onClick(ev) {
     state.tree = setPart(state.db, state.gun, state.cond, state.tree, drop.dataset.bldDrop, null, 0.5);
     renderBuilder();
     syncTreeUrl();
+    return;
+  }
+  const lvRow = ev.target.closest('[data-lv]');
+  if (lvRow) {
+    setStore({ level: Number(lvRow.dataset.lv) });
+    document.getElementById('h-three')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
   const asort = ev.target.closest('[data-asort]');
@@ -1157,6 +1239,9 @@ function onChange(ev) {
   const t = ev.target;
   if (t.dataset.cond) {
     setStore({ [t.dataset.cond]: t.checked });
+  } else if (t.id === 'plevel') {
+    const v = Math.max(0, Math.min(79, Math.round(Number(t.value) || 0)));
+    setStore({ level: v });
   } else if (t.id === 'budget') {
     const v = Math.max(0, Math.round(Number(t.value) || 0));
     setStore({ budget: v });
