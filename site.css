@@ -84,7 +84,8 @@ body[data-route="items"] #view-items { display: block; }
 .page h2 small { font: 400 12.5px/1.5 var(--sans); color: var(--muted); }
 .page h2 .h-tool { margin: 0 0 0 auto; }
 .page h2.h-sub { margin: 0; padding: 0; border: 0; font-size: 15px; }
-.page a { color: var(--accent-2); }
+.page a { color: var(--ink); text-decoration: underline; text-decoration-color: #6a645d; text-underline-offset: 3px; }
+.page a:hover { color: var(--accent); text-decoration-color: var(--accent); }
 .page p { margin: 0 0 10px; }
 .page .note { font-size: 12.5px; color: var(--muted); margin: 10px 0 0; }
 .page .loading, .page .empty { color: var(--muted); padding: 28px 2px; }
@@ -204,7 +205,7 @@ body[data-route="items"] #view-items { display: block; }
 .gun-table tbody tr:hover td { background: var(--panel); }
 .gun-table .num { text-align: right; font-family: var(--num); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .gun-table th.num { font-family: var(--sans); font-size: 12px; }
-.gun-table .num .d { margin-left: 4px; font-size: 13px; color: var(--accent-2); }
+.gun-table .num .d { margin-left: 4px; font-size: 13px; color: var(--muted); }
 .gun-table .num .wait { color: #5d5852; font-size: 13px; }
 .gun-table .pic-col { width: 128px; padding-right: 0; }
 .gun-table .cal { font-family: var(--num); white-space: nowrap; color: var(--ink-2); }
@@ -294,8 +295,8 @@ body[data-route="items"] #view-items { display: block; }
 .compare .none { color: #5d5852; }
 .compare tfoot th, .compare tfoot td { border-bottom-color: var(--rule); }
 .compare tfoot td { font: 15px/1.4 var(--num); font-variant-numeric: tabular-nums; }
-.compare tfoot td.best { color: var(--accent-2); font-weight: 600; }
-.compare tfoot td.best::after { content: '最良'; margin-left: 8px; font: 600 10.5px/1 var(--sans); color: var(--accent); vertical-align: 2px; }
+.compare tfoot td.best { color: var(--ink); font-weight: 700; }
+.compare tfoot td.best::after { content: '最良'; margin-left: 8px; font: 600 10.5px/1 var(--sans); color: var(--ok); vertical-align: 2px; }
 .compare tfoot tr:last-child th, .compare tfoot tr:last-child td { border-bottom: 0; }
 
 /* 配分のスライダー */
@@ -306,7 +307,7 @@ body[data-route="items"] #view-items { display: block; }
 .mix-stats { display: flex; flex-wrap: wrap; gap: 8px 30px; margin-bottom: 10px; }
 .mix-stats .k { display: block; font-size: 12px; color: var(--muted); }
 .mix-stats .v { font: 28px/1.1 var(--num); }
-.mix-stats .d { margin-left: 5px; font: 14px var(--num); color: var(--accent-2); }
+.mix-stats .d { margin-left: 5px; font: 14px var(--num); color: var(--muted); }
 
 .parts-list { margin: 0; padding: 0; list-style: none; }
 .parts-list li {
@@ -439,13 +440,13 @@ dialog.modal::backdrop { background: rgba(6, 8, 9, .72); }
 .detail-sec { margin-top: 16px; }
 .detail-sec h3 { margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); font: 600 12.5px/1.6 var(--sans); color: var(--muted); }
 .detail-sec h3 small { margin-left: 6px; font-size: 12px; }
-.detail-sec h3 b { color: var(--accent-2); }
+.detail-sec h3 b { color: var(--ink); }
 .detail-p { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
 .detail-p.muted { color: var(--muted); font-size: 12.5px; }
 .kv { margin: 0; padding: 0; list-style: none; }
 .kv li { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dotted var(--rule); font-size: 13px; }
 .kv li:last-child { border-bottom: 0; }
-.kv b { font: 500 14px/1.5 var(--num); color: var(--accent-2); white-space: nowrap; }
+.kv b { font: 500 14px/1.5 var(--num); color: var(--ink); white-space: nowrap; }
 .kv a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
 .kv a:hover { color: var(--accent); text-decoration-color: var(--accent); }
 .detail-links { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 13px; }
@@ -778,3 +779,70 @@ dialog.modal::backdrop { background: rgba(6, 8, 9, .72); }
 @media (max-width: 600px) {
   .page .gtabs button { padding: 10px 11px 9px; font-size: 13px; }
 }
+
+/* ------------------------------------------------------------ 条件の要約（たたんだとき） */
+
+.cond-wrap { margin: 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.cond-wrap > summary {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 10px 0;
+  list-style: none; cursor: pointer; font-size: 13.5px;
+}
+.cond-wrap > summary::-webkit-details-marker { display: none; }
+.cw-k { color: var(--muted); font-size: 12.5px; }
+.cw-v b { font-weight: 600; color: var(--ink); }
+.cw-sep { margin: 0 6px; color: #6a645d; }
+.cw-edit { margin-left: auto; padding: 3px 10px; border: 1px solid var(--rule); border-radius: 5px; color: var(--ink-2); font-size: 12.5px; }
+.cond-wrap > summary:hover .cw-edit { border-color: var(--accent); color: var(--accent); }
+.cond-wrap[open] .cw-edit::after { content: '（閉じる）'; }
+.cond-wrap .cond { border: 0; padding-top: 4px; }
+
+/* ------------------------------------------------------------ 数値（ゲーム内のウェポンビルダーの並び） */
+
+.statlist { display: flex; flex-direction: column; border-top: 1px solid var(--rule); }
+.statlist .sr { display: grid; grid-template-columns: 1fr auto 64px; align-items: baseline; gap: 10px;
+                padding: 5px 0; border-bottom: 1px solid var(--rule); }
+.statlist .sl { color: var(--muted); font-size: 12.5px; }
+.statlist .sv { font: 500 20px/1.2 var(--num); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.statlist .sv small { font-size: 12px; color: var(--muted); }
+.statlist .sr:first-child .sv, .statlist .sr:nth-child(2) .sv { font-size: 26px; }
+.dm { font: 600 13px var(--num); text-align: right; white-space: nowrap; }
+.dm.up { color: var(--ok); }
+.dm.down { color: var(--warn); }
+.bld-stats .dm { margin-left: 6px; }
+.build-card .mini { border-top: 0; padding-top: 2px; }
+
+/* ------------------------------------------------------------ 自分で組む: 部品のタイル */
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.tile { position: relative; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); }
+.page .tile-main {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 8px 10px 6px; border: 0; background: none;
+  text-align: left; cursor: pointer; border-radius: 4px 4px 0 0;
+}
+.tile:hover { border-color: var(--accent); }
+.tile-slot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 12px; color: var(--muted); padding-right: 22px; }
+.tile-on { width: 100%; font-size: 11px; color: #7d766d; }
+.tile-on::before { content: '↳ '; }
+.tile .req { padding: 0 4px; border: 1px solid var(--rule); border-radius: 3px; font-size: 10.5px; }
+.tile-pic { height: 72px; margin: 2px 0; }
+.tile-plus { position: absolute; inset: 0; display: grid; place-items: center; font: 300 28px var(--num); color: #6a645d; }
+.tile-name { font: 700 14px/1.35 var(--sans); color: var(--ink); }
+.tile-eff { font: 12.5px/1.4 var(--num); color: var(--muted); }
+.tile-src { padding: 0 10px 8px; }
+.page .tile-info { position: absolute; right: 8px; bottom: 8px; padding: 0 6px; border: 1px solid var(--rule); border-radius: 3px;
+                   background: none; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.page .tile-info:hover { color: var(--accent); border-color: var(--accent); }
+.page .tile-x { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 3px;
+                background: none; color: var(--muted); font: 16px/24px var(--num); text-align: center; }
+.page .tile-x:hover { background: var(--panel-3); color: var(--warn); }
+.tile.empty { border-style: dashed; background: none; }
+.tile.empty .tile-name { color: var(--muted); font-weight: 400; }
+.tile.missing { border-color: var(--warn); }
+.tile.missing .tile-name { color: var(--warn); }
+@media (max-width: 600px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tile-pic { height: 56px; }
+  .tile-name { font-size: 13px; }
+}
+/* ボタンやカードの形をしたリンクには下線を付けない（.page a の下線より強くする） */
+.page a.btn, .page a.gun-card, .page a.saved-name, .page .tabs a, .page .crumbs a { text-decoration: none; }

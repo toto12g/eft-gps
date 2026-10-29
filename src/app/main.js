@@ -136,7 +136,8 @@ async function boot() {
   for (const m of state.db.maps) {
     const opt = document.createElement('option');
     opt.value = m.key;
-    const label = m.name && !/^[0-9a-f]{24} /.test(m.name) ? `${m.name}（${m.key}）` : m.key;
+    // 名前だけにする。キーまで付けると上の帯の選択欄に収まらず「Streets of Tarkov(str」と切れる
+    const label = m.name && !/^[0-9a-f]{24} /.test(m.name) ? m.name : m.key;
     opt.textContent = m.affine ? label : `${label}／地図なし`;
     sel.appendChild(opt);
   }

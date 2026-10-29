@@ -98,6 +98,8 @@ const state = {
   tlOpen: false,
   /** 弾の表の並び */
   ammoSort: 'pen',
+  /** 条件の欄を開いているか */
+  condOpen: false,
   /** 銃のページで開いているタブ */
   tab: 'best',
   /** レベル別の表。銃と条件ごとに覚える */
@@ -207,7 +209,9 @@ function condBar() {
     return `<div class="tl-row"><span class="tl-name">${esc(tr.name)}</span>
       <span class="seg" role="group" aria-label="${esc(tr.name)} の LL">${seg('data-tl', tr.key, cur)}</span></div>`;
   }).join('');
-  return `<div class="cond" role="group" aria-label="計算の条件">
+  return `<details class="cond-wrap"${state.condOpen ? ' open' : ''}>
+    <summary><span class="cw-k">条件</span><span class="cw-v">${condSummary()}</span><span class="cw-edit">変える</span></summary>
+    <div class="cond" role="group" aria-label="計算の条件">
       <label class="cond-item budget"><span class="k">プレイヤー Lv</span>
         <input type="number" id="plevel" min="1" max="79" inputmode="numeric" placeholder="なし"
                value="${s.level || ''}" aria-label="プレイヤーレベル"></label>
@@ -229,7 +233,25 @@ function condBar() {
       ${s.level ? `<p class="cond-note wide">※Lv${s.level} で上がれる LL・使えるフリマ・解放済みのタスクの品物だけで組む（信頼度は足りている前提）。
         LL を押すと Lv の指定は消える</p>` : ''}
       ${s.budget ? '<p class="cond-note wide">※予算ありのときはフリマ・交換を使わない（値段を持っていないため）。銃本体は含まない</p>' : ''}
-    </div>`;
+    </div>
+  </details>`;
+}
+
+/**
+ * 条件の要約。ふだんは条件の欄をたたんでおき、この 1 行だけ見せる。
+ * 7 つの操作が 1 列に並ぶと、いちばん効くプレイヤー Lv が埋もれるため
+ */
+function condSummary() {
+  const s = state.store;
+  const custom = Object.entries(s.tl || {}).filter(([, v]) => v !== s.ll).length;
+  const parts = [
+    s.level ? `Lv${s.level}` : 'Lv 指定なし',
+    s.level ? 'LL は Lv から' : custom ? 'LL 個別' : `LL${s.ll}`,
+    s.budget ? 'フリマなし' : s.flea ? 'フリマあり' : 'フリマなし',
+  ];
+  if (s.suppressor) parts.push('サプレッサーあり');
+  if (s.budget) parts.push(`予算 ${rub(s.budget)}`);
+  return parts.map((x) => `<b>${esc(x)}</b>`).join('<span class="cw-sep">・</span>');
 }
 
 function setStore(patch) {
@@ -467,7 +489,7 @@ function renderGun(slug) {
     </nav>
     ${b ? `
       <section aria-labelledby="h-three" class="gtab" data-tab="best">
-        <h2 id="h-three">おすすめ 3 通り <small>${esc(sameNote(b))}</small></h2>
+        <h2 id="h-three">おすすめ 3 通り <small>▲▼ は標準との差 ${esc(sameNote(b))}</small></h2>
         ${carouselHtml({
           label: 'おすすめ 3 通り',
           className: 'cards',
@@ -650,26 +672,36 @@ function needTags(st) {
   return t.join('');
 }
 
+/**
+ * 標準との差。ゲーム内のウェポンビルダーと同じく、上下は矢印で、良し悪しは色で出す。
+ * 色だけに頼らないよう、良し悪しは title と読み上げにも入れる
+ */
+function deltaMark(d, better, digits = 0) {
+  if (d === null || Math.abs(d) < 1e-9) return '<span class="dm"></span>';
+  const good = better === 'low' ? d < 0 : d > 0;
+  const n = Math.abs(d).toFixed(digits).replace(/\.0+$/, '');
+  const word = good ? '良い' : '悪い';
+  return `<span class="dm ${good ? 'up' : 'down'}" title="標準より${word}">${d > 0 ? '▲' : '▼'}${n}<span class="visually-hidden">（${word}）</span></span>`;
+}
+
+/** 数値の 1 行。名前・値・標準との差 */
+const statRow = (label, val, delta = null, better = 'low', digits = 0) =>
+  `<div class="sr"><span class="sl">${label}</span><span class="sv">${val}</span>${deltaMark(delta, better, digits)}</div>`;
+
 function buildCard(kind, build) {
   const st = build.stats;
   const stock = state.stock;
-  // 反動の % は素の銃からの補正（ゲーム内の表示と同じ）。標準との差は別の行に分ける。
-  // 1 つの数字の横に違う基準の差を並べると、何と比べた差なのか読めなくなる
+  // 並びはゲーム内のウェポンビルダーに合わせる（エルゴ → 反動 → 重さ）。▲▼ は標準との差
   return `<article class="build-card" data-kind="${kind.key}">
     <h3>${esc(kind.label)}</h3>
-    <div class="big">
-      <div class="stat"><span class="k">縦反動</span><span class="v">${st.rv}</span>
-        <span class="d">${signed(st.recoil)}%</span></div>
-      <div class="stat"><span class="k">エルゴ</span><span class="v">${trim1(st.ergo)}</span></div>
-    </div>
-    <div class="meters" aria-hidden="true">
-      <span>反動減</span><span class="meter"><i style="width:${Math.min(100, -st.recoil)}%"></i></span><span>${trim1(-st.recoil)}%</span>
-      <span>エルゴ</span><span class="meter"><i style="width:${st.ergo}%"></i></span><span>${trim1(st.ergo)}</span>
+    <div class="statlist">
+      ${statRow('エルゴ', trim1(st.ergo), st.ergo - stock.ergo, 'high', 1)}
+      ${statRow('縦反動', st.rv, st.rv - stock.rv)}
+      ${statRow('横反動', st.rh, st.rh - stock.rh)}
+      ${statRow('反動の補正', `${signed(st.recoil)}%`)}
+      ${statRow('重さ', `${st.weight.toFixed(2)}<small> kg</small>`, st.weight - stock.weight, 'low', 2)}
     </div>
     <dl class="mini">
-      <dt>横反動</dt><dd>${st.rh}</dd>
-      <dt>標準比</dt><dd>縦 ${signed(st.rv - stock.rv, 0)} ・ エルゴ ${signed(st.ergo - stock.ergo)}</dd>
-      <dt>重さ</dt><dd>${kg(st.weight)}</dd>
       <dt>部品</dt><dd>${st.count} 点</dd>
       <dt>定価</dt><dd>${rub(st.price)}${st.flea || st.barter ? '<sup>※</sup>' : ''}</dd>
     </dl>
@@ -913,13 +945,7 @@ function renderBuilder() {
   document.getElementById('bld-from').textContent = state.treeFrom === 'shared' ? '共有されたもの'
     : state.treeFrom === 'saved' ? `保存: ${state.treeName}` : `元: ${START_LABEL[state.treeFrom]}`;
   const label = (slot) => esc(db.slotLabel[slot] || slot);
-  const diff = (now, was, digits, better) => {
-    const d = now - was;
-    if (Math.abs(d) < 1e-9) return '';
-    const good = better === 'low' ? d < 0 : d > 0;
-    // 色だけで良し悪しを言わないよう、言葉も添える（反動は − が良い、エルゴは + が良い）
-    return `<span class="delta ${good ? 'up' : 'down'}">${signed(d, digits)}<span class="dw">${good ? '良' : '悪'}</span></span>`;
-  };
+  const diff = (now, was, digits, better) => deltaMark(now - was, better, digits);
 
   const warn = [];
   for (const p of issues.missing) warn.push(`<li>${label(p.split('/').pop())}（必須）が空き。組み上がらない</li>`);
@@ -948,23 +974,37 @@ function renderBuilder() {
       <label class="check"><input type="checkbox" id="bld-empty" ${state.showEmpty ? 'checked' : ''}><span>空き口も表示</span></label>
     </div>
     ${savedList(gun)}
-    <div class="table-scroll">
-      <table class="bld">
-        <thead><tr><th scope="col">差し込み口</th><th scope="col">部品</th><th scope="col"><span class="visually-hidden">操作</span></th></tr></thead>
-        <tbody>${rows.filter((r) => r.mod || r.required || state.showEmpty).map((r) => {
-          const src = r.mod ? sourceOf(r.mod, cond, gun) : null;
-          const cls = [r.mod ? '' : 'empty', !r.mod && r.required ? 'missing' : ''].filter(Boolean).join(' ');
-          return `<tr class="${cls}" style="--d:${r.depth}">
-            <th scope="row" style="--d:${r.depth}"><span class="slot${r.depth ? ' sub' : ''}">${label(r.slot)}</span>${r.required ? '<span class="req">必須</span>' : ''}</th>
-            <td>${r.mod ? partCell({ mod: r.mod, source: src }) : '<span class="none">空き</span>'}</td>
-            <td class="ops"><div class="ops-in">
-              <button type="button" class="btn mini" data-bld-pick="${esc(r.path)}">${r.mod ? '替える' : '付ける'}</button>
-              ${r.mod && !r.required ? `<button type="button" class="btn mini" data-bld-drop="${esc(r.path)}">外す</button>` : ''}
-            </div></td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>
+    <div class="tiles">${tilesHtml(rows)}</div>`;
+}
+
+/**
+ * 自分で組むの部品を、ゲームの改造画面のようにアイコンのタイルで並べる。
+ * 名前を読まなくても、いつもの部品かどうかが形で分かる。タイルを押すと替える部品を選ぶ。
+ * 木の深さは、上に「何に付いているか」を書いて示す（字下げの表より、並べたときに読みやすい）
+ */
+function tilesHtml(rows) {
+  const { db, gun, cond } = state;
+  const byPath = new Map(rows.map((r) => [r.path, r]));
+  const label = (slot) => esc(db.slotLabel[slot] || slot);
+  return rows.filter((r) => r.mod || r.required || state.showEmpty).map((r) => {
+    const src = r.mod ? sourceOf(r.mod, cond, gun) : null;
+    const parent = byPath.get(r.path.includes('/') ? r.path.slice(0, r.path.lastIndexOf('/')) : '');
+    const on = parent && parent.mod ? `<span class="tile-on">${esc(parent.mod.s || parent.mod.n)} に付く</span>` : '';
+    const cls = ['tile', r.mod ? '' : 'empty', !r.mod && r.required ? 'missing' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}">
+      <button type="button" class="tile-main" data-bld-pick="${esc(r.path)}"
+              title="${r.mod ? `${esc(r.mod.n)}（押すと替える）` : '押すと付ける'}">
+        <span class="tile-slot">${on}${label(r.slot)}${r.required ? '<span class="req">必須</span>' : ''}</span>
+        <span class="tile-pic inv">${r.mod ? `<img loading="lazy" decoding="async" alt="" src="${itemImage(r.mod.id)}"
+          onerror="this.style.visibility='hidden'">` : '<span class="tile-plus">＋</span>'}</span>
+        <span class="tile-name">${r.mod ? esc(r.mod.s || r.mod.n) : (r.required ? '空き（必須）' : '空き')}</span>
+        <span class="tile-eff">${r.mod ? partEffect(r.mod) : '押して付ける'}</span>
+      </button>
+      ${r.mod ? `<div class="tile-src">${sourceTag(src)}</div>` : ''}
+      ${r.mod ? `<button type="button" class="tile-info" data-mod="${r.mod.i}" aria-label="${esc(r.mod.n)} の詳細">詳細</button>` : ''}
+      ${r.mod && !r.required ? `<button type="button" class="tile-x" data-bld-drop="${esc(r.path)}" aria-label="${esc(r.mod.n)} を外す" title="外す">×</button>` : ''}
     </div>`;
+  }).join('');
 }
 
 /* ------------------------------------------------------------ 保存 */
@@ -1299,7 +1339,7 @@ function onClick(ev) {
     setStore({ tl: { ...(state.store.tl || {}), [tl.dataset.tr]: Number(tl.dataset.tl) }, level: 0 });
     return;
   }
-  const part = ev.target.closest('.part[data-mod]');
+  const part = ev.target.closest('.part[data-mod], .tile-info[data-mod]');
   if (part) {
     openPart(Number(part.dataset.mod));
     return;
@@ -1412,6 +1452,7 @@ function onInput(ev) {
 // 「個別に」を開いているかどうか（描き直しても閉じないように）
 document.addEventListener('toggle', (ev) => {
   if (ev.target.classList && ev.target.classList.contains('cond-more')) state.tlOpen = ev.target.open;
+  if (ev.target.classList && ev.target.classList.contains('cond-wrap')) state.condOpen = ev.target.open;
 }, true);
 
 /** 検索語などを URL に写す。履歴は増やさない（戻るで 1 文字ずつ戻るのは困る） */

@@ -524,6 +524,11 @@ body.dock-collapsed #dock { display: none; }
   background: var(--panel); border: 1px solid var(--accent); border-radius: 2px; color: var(--ink);
 }
 
+/* 中くらいの幅（ノート PC）では、最近のマップのボタンを隠す。選択欄で全マップを選べるので
+   困らない。両方を並べると、ボタンが 2 つしか入らず 3 つ目が「Woo」のように切れていた */
+@media (max-width: 1400px) {
+  #map-tabs { display: none; }
+}
 @media (max-width: 900px) {
   #view-map { overflow-y: auto; grid-template-rows: 60vh auto; }
   #topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; }
