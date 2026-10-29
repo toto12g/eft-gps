@@ -49,6 +49,18 @@ const AMMO_SORT = [['pen', '貫通'], ['dmg', 'ダメージ'], ['ad', 'アーマ
 /** 貫通の棒の幅の上限。アーマークラス 6 の目安（60）より少し上まで */
 const PEN_MAX = 70;
 
+/**
+ * 銃のページのタブ。1 ページに全部を縦に積むと 7000px を超え、目的の場所まで延々とスクロールする。
+ * ゲーム内のウェポンビルダーやトレーダーの画面と同じく、見たいものだけを切り替えて出す
+ */
+const TABS = [
+  ['best', 'おすすめ'],
+  ['build', '自分で組む'],
+  ['mix', '反動とエルゴ'],
+  ['level', 'レベル別'],
+  ['ammo', '弾'],
+];
+
 /** レベル別の表に並べるプレイヤーレベル。トレーダーの LL が上がる辺り（6〜42）を 5 刻みで */
 const LEVELS = [5, 10, 15, 20, 25, 30, 35, 40, 45];
 
@@ -86,6 +98,8 @@ const state = {
   tlOpen: false,
   /** 弾の表の並び */
   ammoSort: 'pen',
+  /** 銃のページで開いているタブ */
+  tab: 'best',
   /** レベル別の表。銃と条件ごとに覚える */
   levelCache: new Map(),
   levelJob: 0,
@@ -326,7 +340,7 @@ function renderGunRows() {
       <td class="pic-col"><span class="thumb inv"><img loading="lazy" decoding="async" alt=""
           src="${itemImage(g.img || g.id)}" onerror="this.style.visibility='hidden'"></span></td>
       <td class="gun-name"><a href="${hashFor('builds', [g.slug])}">${esc(g.s || g.n)}</a>
-        <small>${showCat ? `${esc(catLabel.get(g.cat))} ・ ` : ''}<span class="full">${esc(g.n)}</span><span class="m-cal">${esc(g.cal)}</span></small></td>
+        ${showCat ? `<small>${esc(catLabel.get(g.cat))}<span class="m-cal"> ・ ${esc(g.cal)}</span></small>` : `<small class="m-cal">${esc(g.cal)}</small>`}</td>
       <td class="cal">${esc(g.cal)}</td>
       <td class="num">${trim1(g.e)}</td>
       <td class="num">${st.rv}</td>
@@ -447,8 +461,12 @@ function renderGun(slug) {
     ])}
     ${gunHead(gun, cat)}
     ${condBar()}
+    <nav class="gtabs" role="tablist" aria-label="表示の切り替え">
+      ${TABS.filter(([k]) => b || k === 'build' || k === 'ammo').map(([k, label]) =>
+        `<button type="button" role="tab" data-gtab="${k}" aria-selected="false">${label}</button>`).join('')}
+    </nav>
     ${b ? `
-      <section aria-labelledby="h-three">
+      <section aria-labelledby="h-three" class="gtab" data-tab="best">
         <h2 id="h-three">おすすめ 3 通り <small>${esc(sameNote(b))}</small></h2>
         ${carouselHtml({
           label: 'おすすめ 3 通り',
@@ -458,12 +476,12 @@ function renderGun(slug) {
         })}
       </section>
       ${levelSection()}
-      <section aria-labelledby="h-parts">
+      <section aria-labelledby="h-parts" class="gtab" data-tab="best">
         <h2 id="h-parts">部品の比較
           <label class="check h-tool"><input type="checkbox" id="diff-only"><span>差分だけ</span></label></h2>
         ${compareTable(b)}
       </section>
-      <section aria-labelledby="h-mix" class="mixer">
+      <section aria-labelledby="h-mix" class="mixer gtab" data-tab="mix">
         <h2 id="h-mix">反動とエルゴ</h2>
         <div class="tradeoff-wrap">
           <div class="tradeoff" id="tradeoff"><p class="loading">計算中…</p></div>
@@ -487,7 +505,7 @@ function renderGun(slug) {
     : `<p class="empty">${state.cond.budget
       ? 'この予算では組めません。必須の部品（レシーバー・バレルなど）だけで超えます。'
       : 'この条件では組めません。必須の部品が、この LL でもフリマでも手に入りません。'}</p>`}
-    <section aria-labelledby="h-build" id="builder" class="builder">
+    <section aria-labelledby="h-build" id="builder" class="builder gtab" data-tab="build">
       <h2 id="h-build">自分で組む <small id="bld-from"></small></h2>
       <div class="bld-start" role="group" aria-label="やり直す">
         <span class="k">やり直す</span>
@@ -509,6 +527,27 @@ function renderGun(slug) {
   }
   fillLevels();
   renderBuilder();
+  const want = state.ctx.query.get('tab') || state.tab;
+  showTab(!b && ['best', 'mix', 'level'].includes(want) ? 'build' : want);
+}
+
+function showTab(tab) {
+  if (!TABS.some(([k]) => k === tab)) tab = 'best';
+  state.tab = tab;
+  for (const sec of state.el.querySelectorAll('.gtab')) sec.classList.toggle('on', sec.dataset.tab === tab);
+  for (const btn of state.el.querySelectorAll('[data-gtab]')) btn.setAttribute('aria-selected', String(btn.dataset.gtab === tab));
+  // グラフは隠れている間に幅を測れないので、出したときに描き直す
+  if (tab === 'mix') renderChart();
+}
+
+/** タブを URL に写す（再読み込みや共有で同じタブが開く） */
+function syncTabUrl() {
+  const q = new URLSearchParams(state.ctx.query);
+  if (state.tab === 'best') q.delete('tab');
+  else q.set('tab', state.tab);
+  state.ctx.query = q;
+  const qs = q.toString();
+  history.replaceState(null, '', `${hashFor('builds', [state.gun.slug])}${qs ? `?${qs}` : ''}`);
 }
 
 /* ------------------------------------------------------------ レベル別 */
@@ -516,7 +555,7 @@ function renderGun(slug) {
 function levelSection() {
   const cur = state.store.level;
   const head = KINDS.map((k) => `<th scope="col" data-kind="${k.key}"><span class="swatch"></span>${esc(k.label)}</th>`).join('');
-  return `<section aria-labelledby="h-level">
+  return `<section aria-labelledby="h-level" class="gtab" data-tab="level">
     <h2 id="h-level">レベル別 <small>※そのレベルで買える部品だけで組んだもの</small></h2>
     <div class="table-scroll">
       <table class="lvl">
@@ -841,7 +880,9 @@ function startTree(from) {
   else state.tree = treeFromParts(builds[from].parts);
   state.treeFrom = from;
   renderBuilder();
-  document.getElementById('builder').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showTab('build');
+  syncTabUrl();
+  document.querySelector('.gtabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /** 組みかけを URL に写す。再読み込みしても、人に送っても同じものが出る */
@@ -1072,7 +1113,7 @@ function onPickClick(ev) {
 function ammoSection(gun) {
   const list = ammoFor(state.db, gun, state.ammoSort);
   if (!list.length) return '';
-  return `<section aria-labelledby="h-ammo" id="ammo">
+  return `<section aria-labelledby="h-ammo" id="ammo" class="gtab" data-tab="ammo">
     <h2 id="h-ammo">弾 <small>${list.length} 種</small></h2>
     <div class="table-scroll">${ammoTable(list)}</div>
     <p class="note">※目盛りはアーマークラス × 10。越えるほどそのクラスを抜きやすい（目安）。反動は銃の反動に足される</p>
@@ -1240,6 +1281,12 @@ function pageFoot() {
 /* ------------------------------------------------------------------ 操作 */
 
 function onClick(ev) {
+  const gtab = ev.target.closest('[data-gtab]');
+  if (gtab) {
+    showTab(gtab.dataset.gtab);
+    syncTabUrl();
+    return;
+  }
   const ll = ev.target.closest('[data-ll]');
   if (ll) {
     // 全員まとめての LL。個別の設定は消す
@@ -1277,8 +1324,10 @@ function onClick(ev) {
   }
   const lvRow = ev.target.closest('[data-lv]');
   if (lvRow) {
+    state.tab = 'best';
+    state.ctx.query.delete('tab');
     setStore({ level: Number(lvRow.dataset.lv) });
-    document.getElementById('h-three')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelector('.gtabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
   const asort = ev.target.closest('[data-asort]');

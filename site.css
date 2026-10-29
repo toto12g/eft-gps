@@ -756,3 +756,25 @@ dialog.modal::backdrop { background: rgba(6, 8, 9, .72); }
 @media (max-width: 860px) {
   .hp-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 16px; }
 }
+
+/* ------------------------------------------------------------ 銃のページのタブ */
+
+/* 画面の上に貼り付ける。ゲーム内の画面の上の帯（装備・ハイドアウト…）と同じ使い方で、
+   どこまで下に読んでいても、ほかの表示へ 1 回で移れる */
+.gtabs {
+  position: sticky; top: 0; z-index: 5; display: flex; gap: 0; margin: 18px 0 0;
+  background: var(--bg); border-bottom: 1px solid var(--ink-2); overflow-x: auto; scrollbar-width: none;
+}
+.page .gtabs button {
+  flex: none; padding: 11px 18px 10px; margin-bottom: -1px; border: 0; border-bottom: 3px solid transparent;
+  border-radius: 0; background: none; color: var(--muted); font: 700 14px/1.2 var(--sans); letter-spacing: .02em;
+}
+.page .gtabs button:hover { color: var(--ink); }
+.page .gtabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.gtab { display: none; }
+.gtab.on { display: block; }
+/* タブの直下の見出しは、タブと離れすぎないように */
+.gtab.on > h2:first-child, .gtab.on h2#h-three { margin-top: 22px; }
+@media (max-width: 600px) {
+  .page .gtabs button { padding: 10px 11px 9px; font-size: 13px; }
+}
