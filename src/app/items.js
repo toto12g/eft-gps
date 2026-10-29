@@ -39,14 +39,32 @@ export async function loadItems(file) {
   }
 }
 
-/** 何種類の用途を持つか。多いほど「とりあえず拾っておく」価値がある。 */
-export function useKinds(item) {
-  return ['h', 't', 'b', 'c'].filter((k) => (item[k] || []).length).length;
+/**
+ * 何種類の用途を持つか。多いほど「とりあえず拾っておく」価値がある。
+ * progress（施設 → いまのレベル）を渡すと、ハイドアウトは残りがあるときだけ数える
+ */
+export function useKinds(item, progress = null) {
+  return ['h', 't', 'b', 'c'].filter((k) => (k === 'h' && progress
+    ? hideoutTotal(item, progress) > 0
+    : (item[k] || []).length)).length;
 }
 
-/** ハイドアウトで要る総数。 */
-export function hideoutTotal(item) {
-  return (item.h || []).reduce((n, [, , c]) => n + (c || 0), 0);
+/**
+ * ハイドアウトで要る総数。progress（施設の名前 → いまのレベル）を渡すと、
+ * もう建てたレベルの分を除いた「残り」を返す。
+ */
+export function hideoutTotal(item, progress = null) {
+  return (item.h || []).reduce((n, [st, lv, c]) =>
+    (progress && lv <= (progress[st] || 0) ? n : n + (c || 0)), 0);
+}
+
+/** ハイドアウトの施設と、いちばん上のレベル。アイテムの用途データから拾う */
+export function hideoutStations(items) {
+  const max = new Map();
+  for (const it of Object.values(items)) {
+    for (const [st, lv] of it.h || []) max.set(st, Math.max(max.get(st) || 0, lv));
+  }
+  return [...max.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'ja'));
 }
 
 /** タスクで要る総数（「候補のうち 1 つ」のものは数に入れない）。 */
@@ -87,10 +105,11 @@ export function topItems(items, limit = 40) {
 }
 
 /** 用途を 1 行にまとめる。 */
-export function useSummary(item) {
+export function useSummary(item, progress = null) {
   const parts = [];
-  const h = hideoutTotal(item);
-  if (h) parts.push(`ハイドアウト ${h} 個`);
+  const h = hideoutTotal(item, progress);
+  if (h) parts.push(`ハイドアウト ${progress ? '残り ' : ''}${h} 個`);
+  else if (progress && (item.h || []).length) parts.push('ハイドアウト 済');
   if ((item.t || []).length) parts.push(`タスク ${item.t.length} 件`);
   if ((item.b || []).length) parts.push(`交換 ${item.b.length} 件`);
   if ((item.c || []).length) parts.push(`製作の材料 ${item.c.length} 件`);

@@ -10,12 +10,15 @@
  */
 
 import {
-  loadItems, searchItems, useKinds, hideoutTotal, useSummary,
+  loadItems, searchItems, useKinds, hideoutTotal, useSummary, hideoutStations,
 } from './items.js';
 import { hashFor } from './router.js';
 import {
-  escapeHtml as esc, crumbs, openModal, loadMeta, itemImage,
+  escapeHtml as esc, crumbs, openModal, loadMeta, itemImage, readStore, writeStore,
 } from './ui.js';
+
+/** ハイドアウトの進み具合（施設の名前 → いまのレベル）。このブラウザの中だけに置く */
+const HIDEOUT_KEY = 'eft-gps.hideout';
 
 /** タスクの Wiki。データにはページ名だけを持たせている */
 const WIKI = 'https://escapefromtarkov.fandom.com/wiki/';
@@ -48,7 +51,13 @@ const state = {
   uses: new Set(),
   cat: '',
   sort: 'uses',
+  /** ハイドアウトの進み具合。空なら「まだ何も建てていない」ではなく「使わない」扱い */
+  hp: readStore(HIDEOUT_KEY, {}),
+  stations: [],
 };
+
+/** 進み具合を 1 つでも入れていれば、残りで数える */
+const progress = () => (Object.keys(state.hp).length ? state.hp : null);
 
 /* ------------------------------------------------------------------ 入口 */
 
@@ -62,6 +71,15 @@ export function mount(el) {
   });
   el.addEventListener('change', (ev) => {
     const t = ev.target;
+    if (t.dataset.hp !== undefined) {
+      const v = Number(t.value);
+      state.hp = { ...state.hp, [t.dataset.hp]: v };
+      writeStore(HIDEOUT_KEY, state.hp);
+      const panel = document.querySelector('.hp summary');
+      if (panel && !panel.querySelector('small')) panel.insertAdjacentHTML('beforeend', ' <small>入力済み</small>');
+      renderGrid();
+      return;
+    }
     if (t.dataset.use) {
       if (t.checked) state.uses.add(t.dataset.use);
       else state.uses.delete(t.dataset.use);
@@ -74,6 +92,14 @@ export function mount(el) {
     renderGrid();
   });
   el.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-act="hp-reset"]')) {
+      state.hp = {};
+      writeStore(HIDEOUT_KEY, {});
+      const open = document.querySelector('details.hp')?.open;
+      render();
+      if (open) document.querySelector('details.hp').open = true;
+      return;
+    }
     const card = ev.target.closest('.item-card');
     if (card) openDetail(card.dataset.id);
   });
@@ -96,6 +122,7 @@ export async function show(el, ctx) {
     const cats = new Map();
     for (const it of state.list) if (it.cat) cats.set(it.cat, (cats.get(it.cat) || 0) + 1);
     state.cats = [...cats.entries()].sort((a, b) => b[1] - a[1]);
+    state.stations = hideoutStations(state.items);
   }
 
   const q = ctx.query;
@@ -137,6 +164,7 @@ function render() {
     </header>
     <div class="with-side">
       <aside class="side" aria-label="絞り込み">
+        ${hideoutPanel()}
         <h2 class="side-h">分類</h2>
         <nav class="side-nav" aria-label="分類">
           ${catLink('', 'すべて', state.list.length)}
@@ -171,6 +199,26 @@ function render() {
   renderGrid();
 }
 
+/**
+ * ハイドアウトの進み具合。施設ごとに、いま建っているレベルを選ぶ。
+ * 1 つでも入れると、一覧と詳細の「ハイドアウト ○ 個」が残りの数になる
+ */
+function hideoutPanel() {
+  const set = Object.keys(state.hp).length;
+  const rows = state.stations.map(([st, max]) => {
+    const cur = state.hp[st] || 0;
+    const opts = Array.from({ length: max + 1 }, (_, lv) =>
+      `<option value="${lv}"${lv === cur ? ' selected' : ''}>${lv === 0 ? '未建設' : `Lv${lv}`}${lv === max ? '（最大）' : ''}</option>`).join('');
+    return `<label class="hp-row"><span>${esc(st)}</span><select data-hp="${esc(st)}">${opts}</select></label>`;
+  }).join('');
+  return `<details class="hp">
+    <summary>ハイドアウトの進み具合${set ? ' <small>入力済み</small>' : ''}</summary>
+    <p class="hp-note">※いまのレベルを選ぶと、ハイドアウトで要る数が残りの分になる。このブラウザだけに保存</p>
+    <div class="hp-rows">${rows}</div>
+    ${set ? '<button type="button" class="btn mini" data-act="hp-reset">消す</button>' : ''}
+  </details>`;
+}
+
 function filtered() {
   let rows = state.query.trim()
     ? searchItems(state.items, state.query, 2000).map((it) => ({ ...it }))
@@ -180,14 +228,15 @@ function filtered() {
   for (const u of state.uses) {
     rows = u === 'fir'
       ? rows.filter((it) => it.fir)
-      : rows.filter((it) => (it[u] || []).length);
+      : u === 'h' ? rows.filter((it) => hideoutTotal(it, progress()) > 0)
+        : rows.filter((it) => (it[u] || []).length);
   }
 
   const byName = (a, b) => String(a.n).localeCompare(String(b.n), 'ja');
   const sorters = {
-    uses: (a, b) => useKinds(b) - useKinds(a)
-      || hideoutTotal(b) - hideoutTotal(a) || byName(a, b),
-    hideout: (a, b) => hideoutTotal(b) - hideoutTotal(a) || byName(a, b),
+    uses: (a, b) => useKinds(b, progress()) - useKinds(a, progress())
+      || hideoutTotal(b, progress()) - hideoutTotal(a, progress()) || byName(a, b),
+    hideout: (a, b) => hideoutTotal(b, progress()) - hideoutTotal(a, progress()) || byName(a, b),
     task: (a, b) => (b.t || []).length - (a.t || []).length || byName(a, b),
     name: byName,
   };
@@ -236,7 +285,7 @@ function card(it) {
     '<span class="txt">' +
     `<span class="nm">${esc(it.n)}</span>` +
     `<span class="en">${esc(it.ne || it.s || '')}</span>` +
-    `<span class="use">${esc(useSummary(it))}</span>` +
+    `<span class="use">${esc(useSummary(it, progress()))}</span>` +
     (it.fir ? '<span class="tag fir">FiR</span>' : '') +
     '</span>';
   return el;
@@ -259,9 +308,9 @@ function openDetail(id) {
   if (!it) return;
 
   // what に href を添えると、その行を Wiki へのリンクにする
-  const section = (title, total, rows) => {
+  const section = (title, total, rows, sumLabel = '合計') => {
     if (!rows.length) return '';
-    const sum = total !== undefined ? ` <small>合計 <b>${total} 個</b></small>` : '';
+    const sum = total !== undefined ? ` <small>${sumLabel} <b>${total} 個</b></small>` : '';
     return `<section class="detail-sec"><h3>${title}${sum}</h3><ul class="kv">` +
       rows.map(([what, c, href]) => {
         const label = href
@@ -282,8 +331,10 @@ function openDetail(id) {
          ${it.fir ? '<div class="need"><span class="tag fir">レイド発見品（FiR）が必要</span></div>' : ''}
        </div>
      </div>` +
-    section('ハイドアウトの建設', hideoutTotal(it),
-      (it.h || []).map(([st, lv, c]) => [`${st} Lv${lv}`, `${c} 個`])) +
+    section('ハイドアウトの建設', hideoutTotal(it, progress()),
+      (it.h || []).map(([st, lv, c]) => [`${st} Lv${lv}`,
+        progress() && lv <= (state.hp[st] || 0) ? `済（${c} 個）` : `${c} 個`]),
+      progress() ? '残り' : '合計') +
     section('タスク', undefined,
       (it.t || []).map(([nm, c, alt, slug]) => [
         nm,

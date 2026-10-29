@@ -1505,6 +1505,25 @@ await check('名前で引ける（日本語・英語・半角カナ）', () => {
   return `電線 ${ja.length} / テープ ${tape.length} 件`;
 });
 
+await check('ハイドアウトの進み具合を入れると、残りの数になる', () => {
+  const wires = Object.values(itemDb).find((i) => i.ne === 'Bundle of wires');
+  const all = hideoutTotal(wires);
+  // いちばん多く要る施設を、いちばん上まで建てたことにする
+  const [st] = wires.h.reduce((a, b) => (b[2] > a[2] ? b : a));
+  const max = Math.max(...wires.h.filter((h) => h[0] === st).map((h) => h[1]));
+  const hp = { [st]: max };
+  const left = hideoutTotal(wires, hp);
+  const used = wires.h.filter((h) => h[0] === st).reduce((n, h) => n + h[2], 0);
+  eq(left, all - used, `残りが合わない: ${left} != ${all} - ${used}`);
+  truthy(useSummary(wires, hp).includes('残り'), `まとめが残りを言わない: ${useSummary(wires, hp)}`);
+  // 全部建てたら「済」で、用途の数からも外れる
+  const done = Object.fromEntries(wires.h.map(([s, lv]) => [s, 99]));
+  eq(hideoutTotal(wires, done), 0, '全部建てても残る');
+  truthy(useSummary(wires, done).includes('ハイドアウト 済'), '全部建てたのに済にならない');
+  eq(useKinds(wires, done), useKinds(wires) - 1, '全部建てたのに用途の数が減らない');
+  return `電線: 全 ${all} 個 → ${st} を Lv${max} にすると残り ${left} 個`;
+});
+
 await check('用途のまとめが数を言う', () => {
   const wires = Object.values(itemDb).find((i) => i.ne === 'Bundle of wires');
   const sum = useSummary(wires);

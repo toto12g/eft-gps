@@ -27,6 +27,8 @@ import {
 const COND_KEY = 'eft-gps.buildCond';
 const RECENT_KEY = 'eft-gps.recentGuns';
 const RECENT_MAX = 8;
+/** 保存した組み合わせ。このブラウザの中だけに置く（人ごとに別々。サーバは無い） */
+const SAVED_KEY = 'eft-gps.savedBuilds';
 const DEV = 'https://tarkov.dev/item/';
 const WIKI = 'https://escapefromtarkov.fandom.com/wiki/';
 /** スライダーの刻み。0〜MIX_STEPS を ÷MIX_STEPS して配分にする */
@@ -255,6 +257,7 @@ function renderIndex() {
       <p class="lede">反動最小・バランス・エルゴ最大の 3 通りと、自分で組むための表。</p>
     </header>
     ${condBar()}
+    ${savedList(null)}
     ${recentHtml()}
     <nav class="tabs" aria-label="銃の種類">${tabs}</nav>
     <div class="list-tools">
@@ -852,7 +855,7 @@ function syncTreeUrl() {
 /** 比べる相手（出発点）の数値。共有されたものは標準と比べる */
 function originStats() {
   const f = state.treeFrom;
-  if (f === 'stock' || f === 'shared' || !state.builds) return { label: '標準', stats: state.stock };
+  if (f === 'stock' || f === 'shared' || f === 'saved' || !state.builds) return { label: '標準', stats: state.stock };
   if (f === 'mix') return { label: 'スライダー', stats: (mixBuild() || state.builds.balanced).stats };
   return { label: START_LABEL[f], stats: state.builds[f].stats };
 }
@@ -866,8 +869,8 @@ function renderBuilder() {
   const st = buildStats(db, gun, parts, cond);
   const issues = checkTree(db, gun, cond, state.tree);
   const origin = originStats();
-  document.getElementById('bld-from').textContent = state.treeFrom === 'shared'
-    ? '共有されたもの' : `元: ${START_LABEL[state.treeFrom]}`;
+  document.getElementById('bld-from').textContent = state.treeFrom === 'shared' ? '共有されたもの'
+    : state.treeFrom === 'saved' ? `保存: ${state.treeName}` : `元: ${START_LABEL[state.treeFrom]}`;
   const label = (slot) => esc(db.slotLabel[slot] || slot);
   const diff = (now, was, digits, better) => {
     const d = now - was;
@@ -895,9 +898,15 @@ function renderBuilder() {
     <div class="need">${needTags(st)}</div>
     ${warn.length ? `<ul class="bld-warn" role="status">${warn.join('')}</ul>` : '<p class="bld-ok">組み上がる</p>'}
     <div class="bld-actions">
+      <span class="save-row">
+        <input type="text" id="bld-name" maxlength="40" placeholder="名前（いつもの M4 など）" aria-label="保存する名前"
+               value="${state.treeFrom === 'saved' ? esc(state.treeName) : ''}">
+        <button type="button" class="btn" data-act="save-build">保存</button>
+      </span>
       <button type="button" class="btn" data-act="copy-build">共有</button>
       <label class="check"><input type="checkbox" id="bld-empty" ${state.showEmpty ? 'checked' : ''}><span>空き口も表示</span></label>
     </div>
+    ${savedList(gun)}
     <div class="table-scroll">
       <table class="bld">
         <thead><tr><th scope="col">差し込み口</th><th scope="col">部品</th><th scope="col"><span class="visually-hidden">操作</span></th></tr></thead>
@@ -915,6 +924,69 @@ function renderBuilder() {
         }).join('')}</tbody>
       </table>
     </div>`;
+}
+
+/* ------------------------------------------------------------ 保存 */
+
+/**
+ * 保存した組み合わせの一覧。gun を渡すとその銃の分だけ、null なら全部。
+ * 数値はその場で計算し直す（保存したときの条件ではなく、いまの条件での値）
+ */
+function savedList(gun) {
+  const all = readStore(SAVED_KEY, []).filter((x) => state.db.bySlug.has(x.slug));
+  const list = gun ? all.filter((x) => x.slug === gun.slug) : all;
+  if (!list.length) return '';
+  const rows = list.map((x) => {
+    const g = state.db.bySlug.get(x.slug);
+    const tree = decodeTree(state.db, g, x.b);
+    const st = tree ? buildStats(state.db, g, partsFromTree(state.db, g, tree), state.cond) : null;
+    const href = `${hashFor('builds', [g.slug])}?b=${encodeURIComponent(x.b)}`;
+    return `<li>
+      ${gun ? `<button type="button" class="saved-name" data-load="${esc(x.id)}">${esc(x.name)}</button>`
+        : `<a class="saved-name" href="${href}">${esc(x.name)}</a><span class="saved-gun">${esc(g.s || g.n)}</span>`}
+      <span class="saved-stat">${st ? `縦 ${st.rv} ・ エルゴ ${trim1(st.ergo)}` : 'データ更新で読めない'}</span>
+      <span class="saved-at">${esc(x.at)}</span>
+      <button type="button" class="btn mini" data-del="${esc(x.id)}" aria-label="${esc(x.name)} を削除">削除</button>
+    </li>`;
+  }).join('');
+  return `<section class="saved" aria-label="保存した組み合わせ">
+    <h3 class="saved-h">保存したもの <small>${list.length} 件・このブラウザだけに保存</small></h3>
+    <ul class="saved-list">${rows}</ul>
+  </section>`;
+}
+
+function saveBuild() {
+  const { gun } = state;
+  const input = document.getElementById('bld-name');
+  const all = readStore(SAVED_KEY, []);
+  const name = (input && input.value.trim()) || `${gun.s || gun.n} ${all.filter((x) => x.slug === gun.slug).length + 1}`;
+  const b = encodeTree(state.db, gun, state.tree);
+  // 同じ銃・同じ名前なら上書き（名前を変えずに組み直して保存し直すことが多い）
+  const rest = all.filter((x) => !(x.slug === gun.slug && x.name === name));
+  const d = new Date();
+  const at = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  rest.unshift({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, slug: gun.slug, name, b, at });
+  writeStore(SAVED_KEY, rest);
+  state.treeFrom = 'saved';
+  state.treeName = name;
+  toast(`「${name}」を保存しました`);
+  renderBuilder();
+  syncTreeUrl();
+}
+
+function loadSaved(id) {
+  const x = readStore(SAVED_KEY, []).find((y) => y.id === id);
+  if (!x) return;
+  const tree = decodeTree(state.db, state.gun, x.b);
+  if (!tree) {
+    toast('データが更新されたため読めませんでした');
+    return;
+  }
+  state.tree = tree;
+  state.treeFrom = 'saved';
+  state.treeName = x.name;
+  renderBuilder();
+  syncTreeUrl();
 }
 
 /** 部品を選ぶ小窓。その口に付く部品を、いまの配分で良い順に並べる */
@@ -1223,6 +1295,23 @@ function onClick(ev) {
   }
   if (act && act.dataset.act === 'copy') {
     copyUrl(location.href.replace(/[?&]b=[^&]*/, ''));
+    return;
+  }
+  if (act && act.dataset.act === 'save-build') {
+    saveBuild();
+    return;
+  }
+  const load = ev.target.closest('[data-load]');
+  if (load) {
+    loadSaved(load.dataset.load);
+    return;
+  }
+  const del = ev.target.closest('[data-del]');
+  if (del) {
+    writeStore(SAVED_KEY, readStore(SAVED_KEY, []).filter((x) => x.id !== del.dataset.del));
+    toast('削除しました');
+    if (state.gun) renderBuilder();
+    else renderIndex();
     return;
   }
   if (act && act.dataset.act === 'copy-build') {
