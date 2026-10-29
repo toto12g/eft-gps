@@ -12,7 +12,7 @@
 import {
   loadGuns, bestBuilds, buildAt, stockStats, compareRows, sameCaliber, searchGuns,
   lowestRecoil, sourceOf, buildStats, condKey, traderLL, rawWeight, ammoFor, condForLevel,
-  treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, encodeTree, decodeTree,
+  treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, decodeTree, treeIds, treeFromIds,
   DEFAULT_COND, ERGO_CAP,
 } from './builds.js';
 import { drawTradeoff } from './build-chart.js';
@@ -155,6 +155,18 @@ export async function show(el, ctx) {
       el.innerHTML = `<div class="page-inner"><p class="empty">部品のデータを読めませんでした（${esc(err.message || err)}）。
         再読み込みしても直らなければ、ネットワークを確認してください。</p></div>`;
       return;
+    }
+  }
+  // tarkovkit の Weapon Builder と同じ形（?w=銃の ID&m=部品の ID,…）で来たら、その銃の「自分で組む」へ
+  const w = ctx.query.get('w');
+  if (w && !ctx.parts[0]) {
+    const g = state.db.guns.find((x) => x.id === w);
+    if (g) {
+      const q = new URLSearchParams({ tab: 'build' });
+      if (ctx.query.get('m')) q.set('m', ctx.query.get('m'));
+      history.replaceState(null, '', `${hashFor('builds', [g.slug])}?${q.toString().replace(/%2C/g, ',')}`);
+      ctx.parts = [g.slug];
+      ctx.query = q;
     }
   }
   const slug = ctx.parts[0];
@@ -463,15 +475,27 @@ function renderGun(slug) {
   // 自分で組む木。URL に載っていればそれを、無ければバランスから始める。
   // 条件を変えて描き直すときは、組みかけのものを残す。同じ銃を開いたまま
   // 別の共有リンクを開いたときは、そちらに入れ替える
-  const shared = state.ctx.query.get('b');
-  const changed = shared && state.tree && state.treeGun === slug
-    && shared !== encodeTree(db, gun, state.tree);
-  if (state.treeGun !== slug || changed) {
+  const sharedIds = state.ctx.query.get('m');
+  const legacy = state.ctx.query.get('b');
+  const changed = sharedIds && state.tree && state.treeGun === slug
+    && sharedIds !== treeIds(db, gun, state.tree).join(',');
+  if (state.treeGun !== slug || changed || (legacy && state.treeGun !== slug)) {
     state.treeGun = slug;
-    const decoded = shared ? decodeTree(db, gun, shared) : null;
-    if (shared && !decoded) toast('共有された組み合わせを読めませんでした（データが更新されたため）');
+    let decoded = null;
+    if (sharedIds) {
+      const r = treeFromIds(db, gun, sharedIds.split(','));
+      decoded = r.root;
+      const skipped = r.unknown + r.unplaced;
+      // tarkovkit の組み合わせにはスコープやライトが入っていることがある。このサイトは扱わないので外す
+      if (skipped) toast(`${skipped} 点は外しました（スコープ・ライトなど、このサイトで扱わない部品）`);
+    } else if (legacy) {
+      decoded = decodeTree(db, gun, legacy);
+      if (!decoded) toast('共有された組み合わせを読めませんでした（前の形式で、データが更新されたため）');
+    }
     state.tree = decoded || (b ? treeFromParts(b.balanced.parts) : stockTree(db, gun));
     state.treeFrom = decoded ? 'shared' : b ? 'balanced' : 'stock';
+    // 前の形式の URL は、読めたら新しい形式に書き換える
+    if (decoded && legacy) setTimeout(syncTreeUrl, 0);
   }
 
   state.el.innerHTML = `<div class="page-inner">
@@ -568,7 +592,7 @@ function syncTabUrl() {
   if (state.tab === 'best') q.delete('tab');
   else q.set('tab', state.tab);
   state.ctx.query = q;
-  const qs = q.toString();
+  const qs = q.toString().replace(/%2C/g, ',');
   history.replaceState(null, '', `${hashFor('builds', [state.gun.slug])}${qs ? `?${qs}` : ''}`);
 }
 
@@ -920,9 +944,11 @@ function startTree(from) {
 /** 組みかけを URL に写す。再読み込みしても、人に送っても同じものが出る */
 function syncTreeUrl() {
   const q = new URLSearchParams(state.ctx.query);
-  q.set('b', encodeTree(state.db, state.gun, state.tree));
+  q.delete('b');
+  q.set('m', treeIds(state.db, state.gun, state.tree).join(','));
   state.ctx.query = q;
-  history.replaceState(null, '', `${hashFor('builds', [state.gun.slug])}?${q.toString()}`);
+  // 部品の ID の区切りは「,」のまま（%2C にすると URL が 3 割長くなり、読めなくなる）
+  history.replaceState(null, '', `${hashFor('builds', [state.gun.slug])}?${q.toString().replace(/%2C/g, ',')}`);
 }
 
 /** 比べる相手（出発点）の数値。共有されたものは標準と比べる */
@@ -1013,15 +1039,38 @@ function tilesHtml(rows) {
  * 保存した組み合わせの一覧。gun を渡すとその銃の分だけ、null なら全部。
  * 数値はその場で計算し直す（保存したときの条件ではなく、いまの条件での値）
  */
+/** 保存したものを読む。前の形式（部品の通し番号 b）のものは、いまのデータで読めるうちに ID（m）へ移す */
+function readSaved() {
+  const all = readStore(SAVED_KEY, []);
+  let moved = false;
+  for (const x of all) {
+    if (x.m || !x.b) continue;
+    const g = state.db.bySlug.get(x.slug);
+    const tree = g && decodeTree(state.db, g, x.b);
+    if (!tree) continue;
+    x.m = treeIds(state.db, g, tree).join(',');
+    delete x.b;
+    moved = true;
+  }
+  if (moved) writeStore(SAVED_KEY, all);
+  return all;
+}
+
+/** 保存したものから木を作る（読めなければ null） */
+function savedTree(x, g) {
+  if (x.m) return treeFromIds(state.db, g, x.m.split(',')).root;
+  return x.b ? decodeTree(state.db, g, x.b) : null;
+}
+
 function savedList(gun) {
-  const all = readStore(SAVED_KEY, []).filter((x) => state.db.bySlug.has(x.slug));
+  const all = readSaved().filter((x) => state.db.bySlug.has(x.slug));
   const list = gun ? all.filter((x) => x.slug === gun.slug) : all;
   if (!list.length) return '';
   const rows = list.map((x) => {
     const g = state.db.bySlug.get(x.slug);
-    const tree = decodeTree(state.db, g, x.b);
+    const tree = savedTree(x, g);
     const st = tree ? buildStats(state.db, g, partsFromTree(state.db, g, tree), state.cond) : null;
-    const href = `${hashFor('builds', [g.slug])}?b=${encodeURIComponent(x.b)}`;
+    const href = `${hashFor('builds', [g.slug])}?tab=build&m=${x.m || ''}`;
     return `<li>
       ${gun ? `<button type="button" class="saved-name" data-load="${esc(x.id)}">${esc(x.name)}</button>`
         : `<a class="saved-name" href="${href}">${esc(x.name)}</a><span class="saved-gun">${esc(g.s || g.n)}</span>`}
@@ -1039,14 +1088,14 @@ function savedList(gun) {
 function saveBuild() {
   const { gun } = state;
   const input = document.getElementById('bld-name');
-  const all = readStore(SAVED_KEY, []);
+  const all = readSaved();
   const name = (input && input.value.trim()) || `${gun.s || gun.n} ${all.filter((x) => x.slug === gun.slug).length + 1}`;
-  const b = encodeTree(state.db, gun, state.tree);
+  const m = treeIds(state.db, gun, state.tree).join(',');
   // 同じ銃・同じ名前なら上書き（名前を変えずに組み直して保存し直すことが多い）
   const rest = all.filter((x) => !(x.slug === gun.slug && x.name === name));
   const d = new Date();
   const at = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  rest.unshift({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, slug: gun.slug, name, b, at });
+  rest.unshift({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, slug: gun.slug, name, m, at });
   writeStore(SAVED_KEY, rest);
   state.treeFrom = 'saved';
   state.treeName = name;
@@ -1056,9 +1105,9 @@ function saveBuild() {
 }
 
 function loadSaved(id) {
-  const x = readStore(SAVED_KEY, []).find((y) => y.id === id);
+  const x = readSaved().find((y) => y.id === id);
   if (!x) return;
-  const tree = decodeTree(state.db, state.gun, x.b);
+  const tree = savedTree(x, state.gun);
   if (!tree) {
     toast('データが更新されたため読めませんでした');
     return;
@@ -1383,7 +1432,7 @@ function onClick(ev) {
     return;
   }
   if (act && act.dataset.act === 'copy') {
-    copyUrl(location.href.replace(/[?&]b=[^&]*/, ''));
+    copyUrl(location.href.replace(/[?&](?:b|m)=[^&]*/g, ''));
     return;
   }
   if (act && act.dataset.act === 'save-build') {

@@ -111,6 +111,17 @@ async function setupMenu() {
 
 /* ------------------------------------------------------------------ 起動 */
 
+// tarkovkit の Weapon Builder の URL の後ろ（?w=銃の ID&m=部品の ID,…）を、このサイトの URL に
+// 付けて開いたとき。# の前に来るので、カスタムの画面の形に直してから描く
+{
+  const sp = new URLSearchParams(location.search);
+  if (sp.get('w')) {
+    const q = new URLSearchParams({ w: sp.get('w') });
+    if (sp.get('m')) q.set('m', sp.get('m'));
+    history.replaceState(null, '', `${location.pathname}#/builds?${q.toString().replace(/%2C/g, ',')}`);
+  }
+}
+
 setupModal();
 setupMenu();
 function showError(err) {

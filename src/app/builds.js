@@ -760,6 +760,47 @@ export function decodeTree(db, gun, str) {
   return walk(root, 0) ? root : null;
 }
 
+/**
+ * 木を、部品の ID の並びにする（URL と保存に使う）。親が子より先、口の順。
+ * 部品の通し番号（encodeTree）と違い、データを作り直してもずれない。
+ * tarkovkit の Weapon Builder の `m=` と同じ形なので、向こうの URL もそのまま読める
+ */
+export function treeIds(db, gun, root) {
+  return partsFromTree(db, gun, root).map((p) => p.mod.id);
+}
+
+/**
+ * 部品の ID の並びから木を作る。口を順にたどり、まだ使っていない ID のうち
+ * その口に付くいちばん前のものを置く（同じ部品を 2 つ使うときは ID が 2 回並ぶ）。
+ * 自分で書いた並びは書いた順にたどるので、そのまま元に戻る。
+ * @returns {{root, unknown:number, unplaced:number}} unknown はこのサイトのデータに無い部品
+ *   （スコープなど、計算に入れていないもの）、unplaced はどの口にも付けられなかった部品の数
+ */
+export function treeFromIds(db, gun, ids) {
+  const pool = [];
+  let unknown = 0;
+  for (const id of ids) {
+    const m = db.byId.get(id);
+    if (m) pool.push(m.i);
+    else if (id) unknown++;
+  }
+  const used = new Array(pool.length).fill(false);
+  const grow = (slots, depth) => {
+    const kids = {};
+    if (depth > MAX_DEPTH) return kids;
+    for (const [slotId, , ref] of slots) {
+      const list = db.lists[ref];
+      const k = pool.findIndex((i, n) => !used[n] && list.includes(i));
+      if (k < 0) continue;
+      used[k] = true;
+      kids[slotId] = { mod: pool[k], kids: grow(db.mods[pool[k]].sl || [], depth + 1) };
+    }
+    return kids;
+  };
+  const root = { mod: null, kids: grow(gun.sl, 0) };
+  return { root, unknown, unplaced: used.filter((u) => !u).length };
+}
+
 /** 配分 t（0〜1、正規化したもの）を、計算に使う生の重み s に直す */
 export function rawWeight(t, scale) {
   if (t <= 0) return 0;

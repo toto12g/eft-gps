@@ -46,7 +46,7 @@ import {
 import {
   decodeGuns, bestBuilds, buildAt, stockStats, compareRows, sourceOf, searchGuns, buildStats,
   treeFromParts, stockTree, builderRows, partsFromTree, setPart, checkTree, encodeTree, decodeTree,
-  rawWeight, traderLL, ammoFor, condForLevel, DEFAULT_COND, ERGO_CAP,
+  rawWeight, traderLL, ammoFor, condForLevel, treeIds, treeFromIds, DEFAULT_COND, ERGO_CAP,
 } from '../src/app/builds.js';
 import { parseHash, hashFor } from '../src/app/router.js';
 
@@ -3358,6 +3358,36 @@ await check('URL に入れた組み合わせを読み戻せる', () => {
   eq(decodeTree(gdb, m4, 'zzzz'), null, '付かない部品を読み込んだ');
   eq(decodeTree(gdb, m4, '!!'), null, '壊れた文字列を読み込んだ');
   return `${code.length} 文字`;
+});
+
+await check('共有と保存は部品の ID で書き、元に戻せる', () => {
+  // 部品の通し番号（?b=）はデータを作り直すとずれる。ID（?m=）ならずれない
+  for (const k of KIND_KEYS) {
+    const tree = treeFromParts(allBuilds.get('m4a1')[k].parts);
+    const ids = treeIds(gdb, m4, tree);
+    eq(ids.length, allBuilds.get('m4a1')[k].parts.length, `${k} の部品の数`);
+    const back = treeFromIds(gdb, m4, ids);
+    eq(back.unknown + back.unplaced, 0, `${k} で置けない部品がある`);
+    eq(treeIds(gdb, m4, back.root).join(','), ids.join(','), `${k} が元に戻らない`);
+    // 並びを入れ替えても、同じ口に同じ部品が付く（tarkovkit の URL は順序が違う）
+    const shuffled = treeFromIds(gdb, m4, ids.slice().reverse());
+    eq(shuffled.unplaced, 0, `${k} を逆順にすると置けない部品が出る`);
+  }
+  return 'M4A1 の 3 通りとも元に戻る';
+});
+
+await check('tarkovkit の Weapon Builder の URL を読める', () => {
+  // 2026-10 に受け取った M4A1 の組み合わせ（16 点。スコープのマウントとスコープはこのサイトで扱わない）
+  const m = '5cc9bcaed7f00c011c04e179,55d4887d4bdc2d962f8b4570,63f5ed14534b2c3d5479a677,5b3b99265acfc4704b4a1afb,'
+    + '5b3b99475acfc432ff4dcbee,68caabc3f42a4476cf0be2a6,68caac500bfe742288085e1e,68caac96933990601c07f476,'
+    + '68caad12269e10396503acfe,63d3ce281fe77d0f2801859e,640b20359ab20e15ee445fa9,651a8e529829226ceb67c319,'
+    + '5bc09a18d4351e003562b68e,5a33ca0fc4a282000d72292f,5d44069ca4b9361ebd26fc37,5b2240bf5acfc40dc528af69';
+  const r = treeFromIds(gdb, m4, m.split(','));
+  eq(r.unknown, 2, 'このサイトに無い部品の数（スコープとマウント）');
+  eq(r.unplaced, 0, '置けなかった部品がある');
+  eq(partsFromTree(gdb, m4, r.root).length, 14, '置けた部品の数');
+  eq(checkTree(gdb, m4, DEFAULT_COND, r.root).missing.length, 0, '必須の口が空いた');
+  return '16 点中 14 点を置けた（2 点はスコープ類）';
 });
 
 await check('部品を替えると、下の口は引き継ぐか埋める', () => {

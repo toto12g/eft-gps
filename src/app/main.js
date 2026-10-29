@@ -1326,7 +1326,14 @@ function setupGuide() {
   // 初めて来た人には自動で出す。一度閉じたら以後は出さない。
   // ?nohelp=1 は動作確認のスクリーンショット用。初回案内が地図を覆うのを避ける
   const skipHelp = new URLSearchParams(location.search).get('nohelp') === '1';
-  if (!skipHelp && localStorage.getItem('eft-gps.setupSeen') !== '1') open();
+  // 地図の画面を開いたときだけ出す。共有されたカスタムのリンクから初めて来た人に、
+  // フォルダ接続の手順が覆いかぶさると、見に来たものが見えない
+  const maybeOpen = () => {
+    if (skipHelp || localStorage.getItem('eft-gps.setupSeen') === '1') return;
+    if (parseHash(location.hash).route === 'map' && $('setup').hidden) open();
+  };
+  maybeOpen();
+  window.addEventListener('eft:route', maybeOpen);
 }
 
 /* ------------------------------------------------------------------ 監視 */
