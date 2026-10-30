@@ -92,6 +92,8 @@ const state = {
   treeFrom: 'balanced',
   /** 部品を選ぶ小窓で選んでいる口 */
   pick: null,
+  /** 自分で組むの出し方。図（銃のまわりに口を並べる）か一覧（タイル） */
+  bldView: readStore('eft-gps.bldView', 'map'),
   /** 自分で組む表に、空いている任意の口も出すか */
   showEmpty: false,
   /** 「個別に」を開いているか（描き直しても閉じないように） */
@@ -1000,7 +1002,74 @@ function renderBuilder() {
       <label class="check"><input type="checkbox" id="bld-empty" ${state.showEmpty ? 'checked' : ''}><span>空き口も表示</span></label>
     </div>
     ${savedList(gun)}
-    <div class="tiles">${tilesHtml(rows)}</div>`;
+    <div class="bld-view seg" role="group" aria-label="出し方">
+      <button type="button" data-bview="map" aria-pressed="${state.bldView === 'map'}">図</button>
+      <button type="button" data-bview="list" aria-pressed="${state.bldView === 'list'}">一覧</button>
+    </div>
+    ${state.bldView === 'map' ? diagramHtml(rows) : `<div class="tiles">${tilesHtml(rows)}</div>`}`;
+}
+
+/* ------------------------------------------------------------ 組み立て図 */
+
+/**
+ * 部品をどの場所に出すか。ゲームの改造画面と同じく、銃の画像を真ん中に置き、
+ * 前側（マズル〜レシーバー）は左、ストックとチャージングハンドルは右、マガジンとグリップは下。
+ * マウント・フォアグリップ・照準などは、付いている部品と同じ列に積む
+ */
+const ZONE = [
+  [/^mod_muzzle/, 'muzzle'], [/^mod_gas_block/, 'gas'], [/^mod_barrel/, 'barrel'],
+  [/^mod_handguard/, 'hg'], [/^mod_reciever/, 'rec'], [/^mod_stock/, 'stock'],
+  [/^mod_charge/, 'charge'], [/^mod_magazine/, 'mag'], [/^mod_pistol_?grip/, 'grip'],
+];
+const FRONT = [['muzzle', 'マズル'], ['gas', 'ガスブロック'], ['barrel', 'バレル'], ['hg', 'ハンドガード'], ['rec', 'レシーバー']];
+const REAR = [['charge', 'チャージングハンドル'], ['stock', 'ストック']];
+const BOTTOM = [['mag', 'マガジン'], ['grip', 'グリップ'], ['other', 'そのほか']];
+
+function zoneOf(path, byPath) {
+  const slot = path.split('/').pop();
+  const hit = ZONE.find(([re]) => re.test(slot));
+  if (hit) return hit[1];
+  // マウント・フォアグリップ・照準などは、付いている部品の場所に寄せる
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+  return parent && byPath.has(parent) ? zoneOf(parent, byPath) : 'other';
+}
+
+/** 図の中の小さな数値。エルゴは + が、反動は − が良い */
+function miniEffect(m) {
+  const out = [];
+  if (m.e) out.push(`<span class="${m.e > 0 ? 'good' : 'bad'}">${signed(m.e)}</span>`);
+  if (m.r) out.push(`<span class="${m.r < 0 ? 'good' : 'bad'}">${signed(m.r)}%</span>`);
+  return out.join(' ');
+}
+
+function diagramHtml(rows) {
+  const { db, gun } = state;
+  const shown = rows.filter((r) => r.mod || r.required);
+  const byPath = new Map(rows.map((r) => [r.path, r]));
+  const zones = new Map();
+  for (const r of shown) {
+    const z = zoneOf(r.path, byPath);
+    if (!zones.has(z)) zones.set(z, []);
+    zones.get(z).push(r);
+  }
+  const box = (r) => `<button type="button" class="dg-box${r.mod ? '' : ' missing'}" data-bld-pick="${esc(r.path)}"
+      title="${r.mod ? `${esc(r.mod.n)}（押すと替える）` : '押すと付ける'}">
+      <span class="dg-slot">${esc(db.slotLabel[r.slot] || r.slot)}</span>
+      <span class="dg-pic inv">${r.mod ? `<img loading="lazy" decoding="async" alt="" src="${itemImage(r.mod.id)}"
+        onerror="this.style.visibility='hidden'">` : '<span class="tile-plus">＋</span>'}</span>
+      <span class="dg-name">${r.mod ? esc(r.mod.s || r.mod.n) : '空き'}</span>
+      <span class="dg-eff">${r.mod ? miniEffect(r.mod) : '必須'}</span>
+    </button>`;
+  const group = ([key, title]) => (zones.has(key)
+    ? `<div class="dg-group" data-zone="${key}" aria-label="${title}">${zones.get(key).map(box).join('')}</div>` : '');
+  return `<div class="diagram-wrap"><div class="diagram">
+    <div class="dg-front">${FRONT.map(group).join('')}</div>
+    <div class="dg-gun inv"><img alt="" src="${itemImage(gun.img || gun.id, '512')}"
+      onerror="this.onerror=null;this.src='${itemImage(gun.img || gun.id)}'"></div>
+    <div class="dg-rear">${REAR.map(group).join('')}</div>
+    <div class="dg-bottom">${BOTTOM.map(group).join('')}</div>
+  </div></div>
+  <p class="note">※口を押すと部品を選べる。銃の画像は標準の姿（付けた部品は反映しない）</p>`;
 }
 
 /**
@@ -1417,6 +1486,13 @@ function onClick(ev) {
     state.ctx.query.delete('tab');
     setStore({ level: Number(lvRow.dataset.lv) });
     document.querySelector('.gtabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  const bview = ev.target.closest('[data-bview]');
+  if (bview) {
+    state.bldView = bview.dataset.bview;
+    writeStore('eft-gps.bldView', state.bldView);
+    renderBuilder();
     return;
   }
   const asort = ev.target.closest('[data-asort]');
