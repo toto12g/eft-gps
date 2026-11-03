@@ -1204,6 +1204,10 @@ def build_tasks(refresh: bool, id_to_key: dict):
         supplement_from_wiki(refresh, en_names | {t.get("name") or "" for t in tasks}, by_map, out_dir)
     except Exception as exc:  # noqa: BLE001 取り込み元が別サイトなので何が起きても続行
         print(f"  !! Wiki でタスクを補えませんでした: {exc}", file=sys.stderr)
+    try:
+        supplement_events(refresh, by_map)
+    except Exception as exc:  # noqa: BLE001 同上
+        print(f"  !! Wiki からイベントのタスクを取れませんでした: {exc}", file=sys.stderr)
 
     for stale in out_dir.glob("*.json"):
         stale.unlink()
@@ -1236,6 +1240,8 @@ WIKI_MAPS = {
     "Reserve": "reserve", "Shoreline": "shoreline", "Streets of Tarkov": "streets-of-tarkov",
     "Terminal": "terminal", "The Lab": "the-lab", "The Labyrinth": "the-labyrinth",
     "Woods": "woods",
+    # イベントのマップ。座標は元のマップと同じなので、元の地図に載せる
+    "Infected Lab": "the-lab", "Infected Factory": "factory",
 }
 WIKI_LINK = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]")
 
@@ -1456,6 +1462,75 @@ def supplement_from_wiki(refresh: bool, upstream_names: set, by_map: dict, prev_
 
     print(f"  Wiki でタスクを補った: 前回のデータを残した {kept} 件 / Wiki の目標文で作った {built} 件",
           file=sys.stderr)
+
+
+# 期間限定のイベントのタスク。Wiki では 1 件ずつ「Halloween: Rumors」のような名前のページになっていて、
+# クエスト一覧（Quests）にも tarkov.dev にも載らない。ページ名の頭で拾う
+EVENT_PREFIXES = {"Halloween:": "ハロウィン"}
+
+
+def supplement_events(refresh: bool, by_map: dict):
+    """期間限定のイベントのタスクを Wiki から足す（2026-10 のハロウィンで 19 件）。
+
+    各ページの Infobox から渡すトレーダーと場所を、「Objectives」の箇条書きから目標を取る。
+    座標は無いので、地図には出ずタスクの一覧と目標の文だけになる。名前には
+    【ハロウィン】のようにイベント名を付け、期間限定だと分かるようにする。
+    イベントが終わっても Wiki のページは残るので、終わったら EVENT_PREFIXES から外すこと。
+    """
+    base = "https://escapefromtarkov.fandom.com/api.php?format=json&"
+    added = 0
+    for prefix, label in EVENT_PREFIXES.items():
+        listing = json.loads(fetch(
+            base + "action=query&list=allpages&aplimit=200&apprefix=" + urllib.parse.quote(prefix),
+            f"wiki_event_{label}.json", refresh))
+        for page in listing.get("query", {}).get("allpages", []):
+            title = page["title"]
+            slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+            text = json.loads(fetch(
+                base + "action=parse&prop=wikitext&redirects=1&page=" + urllib.parse.quote(title),
+                f"wiki_ev_{slug}.json", refresh))["parse"]["wikitext"]["*"]
+            if "Infobox quest" not in text:
+                continue  # イベントの品物のページなどはタスクではない
+            given = re.search(r"\|\s*given by\s*=\s*\[\[([^\]|]+)", text)
+            loc = re.search(r"\|\s*location\s*=([^\n]*)", text)
+            loc_maps = [WIKI_MAPS[m] for m in re.findall(r"\[\[([^\]|]+)", loc.group(1) if loc else "")
+                        if m in WIKI_MAPS]
+            rows = []
+            for line in wiki_section(text, "Objectives").splitlines():
+                b = re.match(r"^\s*(\*+)\s*(.*)$", line)
+                if not b:
+                    continue
+                d, maps = wiki_plain(b.group(2))
+                opt = bool(re.match(r"^\(Optional\)\s*", d, re.I))
+                d = re.sub(r"^\(Optional\)\s*", "", d, flags=re.I)
+                if not d:
+                    continue
+                o = {"d": d, "t": "wiki"}
+                if len(b.group(1)) > 1:
+                    o["ind"] = len(b.group(1)) - 1
+                if opt:
+                    o["opt"] = 1
+                if maps:
+                    o["sm"] = maps
+                rows.append(o)
+            if not rows:
+                continue
+            name = title[len(prefix):].strip()
+            maps = list(dict.fromkeys(loc_maps + [k for o in rows for k in o.get("sm", [])]))
+            rec = {
+                "id": "event-" + slug,
+                "n": f"【{label}】{name}",
+                "tr": (given.group(1).strip() if given else "?"),
+                "lv": None,
+                "wk": 1,
+                "ev": label,
+                "o": rows,
+                "w": "https://escapefromtarkov.fandom.com/wiki/" + urllib.parse.quote(title.replace(" ", "_")),
+            }
+            for map_key in maps or [ANY_MAP]:
+                by_map.setdefault(map_key, []).append(dict(rec))
+            added += 1
+    print(f"  イベントのタスクを Wiki から足した: {added} 件", file=sys.stderr)
 
 
 # スイッチを入れないと使えない脱出口と、入れる順のスイッチ。

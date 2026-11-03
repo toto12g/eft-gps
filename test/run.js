@@ -2940,6 +2940,20 @@ await check('Wiki で補ったタスクは上流のタスクと重複しない',
 
 /* --------------------------------------------------------------------- T32 */
 
+await check('期間限定のイベントのタスクを Wiki から足している', async () => {
+  // 2026-10 のハロウィン（パッチ 1.3.0.0）。tarkov.dev にも Wiki のクエスト一覧にも無く、
+  // 「Halloween: Rumors」のような個別のページにだけある
+  // 読み込みはマップごとに覚えるので、ほかのテストと混ざらないよう別のキーで読む
+  const factory = await loadTasks('ev-factory', '../data/tasks/factory.json');
+  const lab = await loadTasks('ev-the-lab', '../data/tasks/the-lab.json');
+  const ev = [...factory, ...lab].filter((t) => t.ev);
+  truthy(ev.length >= 4, `Factory と Lab のイベントのタスクが少ない: ${ev.length}`);
+  truthy(ev.every((t) => t.n.startsWith('【') && t.o && t.o.length), '名前にイベント名が無いか、目標が空');
+  truthy(factory.some((t) => t.n.includes('Rumors')), 'Infected Factory の Rumors が Factory に無い');
+  truthy(lab.some((t) => t.n.includes('The Best Defense')), 'Infected Lab の The Best Defense が The Lab に無い');
+  return `Factory ${factory.filter((t) => t.ev).length} 件 / The Lab ${lab.filter((t) => t.ev).length} 件`;
+});
+
 group('T32 Factory で現在地が動かない不具合（報告された不具合）');
 
 // 2026-10-20 の Factory のレイド（実機 9 枚, 03:57〜04:01）。[更新時刻 ms, ファイル名]
