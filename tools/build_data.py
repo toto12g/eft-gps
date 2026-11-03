@@ -1468,6 +1468,35 @@ def supplement_from_wiki(refresh: bool, upstream_names: set, by_map: dict, prev_
 # クエスト一覧（Quests）にも tarkov.dev にも載らない。ページ名の頭で拾う
 EVENT_PREFIXES = {"Halloween:": "ハロウィン"}
 
+# イベントのタスクの目標地点。座標はどこにも無い（tarkov.dev にも Wiki にも）ので、
+# 目標の文が名指ししている場所を、地図にある地名（label）か鍵の扉（lock の鍵の名前）から引く。
+#   (目標の文に含まれる語, マップ, "label" か "lock", 地名か鍵の名前)
+# 地名から引いたものは「おおよその場所」（地名の印の位置で、建物の中の正確な場所ではない）。
+# Woods の train depot は地図に地名が無いので出せない。Coincidence?（信号の出どころ）と
+# Follow-Up Examination（科学者の死体）は場所が名指しされていないので出せない
+EVENT_SPOTS = [
+    ("cameras at the dorms on Customs", "customs", "label", "Dorms"),
+    ("water treatment plant on Lighthouse", "lighthouse", "label", "Water Treatment"),
+    ("train depot on Reserve", "reserve", "label", "Train Station"),
+    ("Health Resort on Shoreline", "shoreline", "label", "Resort"),
+    ("room 105 of the two-story dorm on Customs", "customs", "lock", "社員寮105号室の鍵"),
+]
+
+
+def event_spot(desc: str):
+    """目標の文から、地図に出す地点を引く。見つからなければ None。"""
+    for words, map_key, kind, name in EVENT_SPOTS:
+        if words.lower() not in desc.lower():
+            continue
+        path = DATA / "landmarks" / f"{map_key}.json"
+        if not path.exists():
+            return None
+        lm = json.loads(path.read_text(encoding="utf-8"))
+        for rec in lm.get(kind) or []:
+            if rec.get("n") == name and rec.get("p"):
+                return map_key, rec["p"], kind == "label"
+    return None
+
 
 def supplement_events(refresh: bool, by_map: dict):
     """期間限定のイベントのタスクを Wiki から足す（2026-10 のハロウィンで 19 件）。
@@ -1479,6 +1508,7 @@ def supplement_events(refresh: bool, by_map: dict):
     """
     base = "https://escapefromtarkov.fandom.com/api.php?format=json&"
     added = 0
+    spots = 0
     for prefix, label in EVENT_PREFIXES.items():
         listing = json.loads(fetch(
             base + "action=query&list=allpages&aplimit=200&apprefix=" + urllib.parse.quote(prefix),
@@ -1512,6 +1542,14 @@ def supplement_events(refresh: bool, by_map: dict):
                     o["opt"] = 1
                 if maps:
                     o["sm"] = maps
+                spot = event_spot(d)
+                if spot:
+                    map_key, pos, rough = spot
+                    # 候補の地点（l）として出す。地図では「1 か所に決まっていない」点線の印になる
+                    o["l"] = [{"m": map_key, "p": [pos]}]
+                    if rough:
+                        o["d"] = d + "（地点はおおよそ）"
+                    spots += 1
                 rows.append(o)
             if not rows:
                 continue
@@ -1530,7 +1568,7 @@ def supplement_events(refresh: bool, by_map: dict):
             for map_key in maps or [ANY_MAP]:
                 by_map.setdefault(map_key, []).append(dict(rec))
             added += 1
-    print(f"  イベントのタスクを Wiki から足した: {added} 件", file=sys.stderr)
+    print(f"  イベントのタスクを Wiki から足した: {added} 件（地点を付けた目標 {spots}）", file=sys.stderr)
 
 
 # スイッチを入れないと使えない脱出口と、入れる順のスイッチ。
